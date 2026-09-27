@@ -1,0 +1,53 @@
+{
+  "name": "perception",
+  "version": "0.1.0",
+  "description": "A live desktop canvas for talking with an AI agent",
+  "main": "./out/main/index.js",
+  "author": "Perception contributors",
+  "license": "MIT",
+  "scripts": {
+    "dev": "pnpm build:mcp && electron-vite dev",
+    "test": "esbuild tests/annotate-image.test.ts --bundle --platform=node --format=cjs --outfile=out/tests/annotate-image.test.cjs && node --test out/tests/annotate-image.test.cjs",
+    "typecheck": "tsc --noEmit",
+    "build:mcp": "esbuild src/mcp/server.ts --bundle --platform=node --format=cjs --target=node22 --outfile=out/mcp/server.cjs",
+    "build": "pnpm typecheck && electron-vite build && pnpm build:mcp",
+    "package:mac": "pnpm build && electron-builder --mac dir"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/pngjs": "^6.0.5",
+    "electron": "^39.0.0",
+    "electron-builder": "^26.0.0",
+    "electron-vite": "^5.0.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.9.0",
+    "vite": "^7.0.0"
+  },
+  "build": {
+    "appId": "dev.perception.app",
+    "productName": "Perception",
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "out/mcp/server.cjs"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        "dir"
+      ],
+      "extendInfo": {
+        "NSScreenCaptureUsageDescription": "Perception captures the display only when you send a message, so your agent can see what you are asking about."
+      }
+    }
+  },
+  "packageManager": "pnpm@10.21.0",
+  "pnpm": {
+    "onlyBuiltDependencies": ["electron", "esbuild"]
+  },
+  "dependencies": {
+    "pngjs": "^7.0.0"
+  }
+}
