@@ -1,16 +1,18 @@
 import { app, BrowserWindow, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, screen, shell, systemPreferences, Tray } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
-import { access, mkdir, unlink, writeFile } from 'node:fs/promises'
+import { access, mkdir, readFile, unlink, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import { homedir } from 'node:os'
 import type { Display } from 'electron'
 import type { AgentMark, Mode, OverlayState, Rectangle } from '../shared/types'
+import { PNG } from 'pngjs'
 import { annotateImage } from './annotate-image'
 import { CodexAgent } from './codex-agent'
 import { DrawingBridge } from './drawing-bridge'
+import { clearAnnotations } from './overlay-actions'
+import { boundsToPosition, positionToBounds, readPreferences, validShortcut, type Preferences } from './preferences'
 
-const SHORTCUT = 'CommandOrControl+Shift+Space'
 const windows: { canvas: BrowserWindow | null; toolbar: BrowserWindow | null; composer: BrowserWindow | null } = {
   canvas: null, toolbar: null, composer: null
 }
@@ -23,17 +25,23 @@ const state: OverlayState = {
   loading: false,
   status: 'Starting…',
   codexPath: null,
+  shortcut: 'Command+Shift+Space',
   shortcutReady: false
 }
 
 let activeDisplay: Display
 let tray: Tray
+let settingsWindow: BrowserWindow | null = null
 let bridge: DrawingBridge
 let agent: CodexAgent
 let requestVersion = 0
+let preferences: Preferences = readPreferences(null)
+let saveQueue: Promise<void> = Promise.resolve()
+let suppressMarks = false
+let positionSaveTimer: NodeJS.Timeout | null = null
 
 function broadcast(): void {
-  for (const win of Object.values(windows)) {
+  for (const win of [...Object.values(windows), settingsWindow]) {
     if (win && !win.isDestroyed()) win.webContents.send('overlay:state', state)
   }
 }
@@ -59,7 +67,7 @@ function makeWindow(bounds: Electron.Rectangle, view: string, focusable: boolean
     backgroundColor: '#00000000',
     hasShadow: false,
     resizable: false,
-    movable: false,
+    movable: view !== 'canvas',
     minimizable: false,
     maximizable: false,
     skipTaskbar: true,
@@ -82,9 +90,29 @@ function makeWindow(bounds: Electron.Rectangle, view: string, focusable: boolean
 function layout(display: Display): void {
   const { x, y, width, height } = display.bounds
   windows.canvas?.setBounds({ x, y, width, height })
-  windows.toolbar?.setBounds({ x: x + width - 78, y: y + Math.max(70, Math.round(height * 0.25)), width: 62, height: 230 })
+  const toolbarBounds = positionToBounds(display.bounds, { width: 62, height: 230 }, preferences.positions.toolbar, {
+    x: x + width - 78, y: y + Math.max(70, Math.round(height * 0.25))
+  })
+  windows.toolbar?.setBounds(toolbarBounds)
   const composerWidth = Math.min(620, width - 40)
-  windows.composer?.setBounds({ x: x + Math.round((width - composerWidth) / 2), y: y + height - 265, width: composerWidth, height: 245 })
+  const composerBounds = positionToBounds(display.bounds, { width: composerWidth, height: 245 }, preferences.positions.composer, {
+    x: x + Math.round((width - composerWidth) / 2), y: y + height - 265
+  })
+  windows.composer?.setBounds(composerBounds)
+}
+
+function savePreferences(): Promise<void> {
+  const contents = JSON.stringify(preferences, null, 2)
+  saveQueue = saveQueue.catch(() => {}).then(() => writeFile(join(app.getPath('userData'), 'preferences.json'), contents))
+  return saveQueue
+}
+
+function queuePositionSave(): void {
+  if (positionSaveTimer) clearTimeout(positionSaveTimer)
+  positionSaveTimer = setTimeout(() => {
+    positionSaveTimer = null
+    void savePreferences()
+  }, 180)
 }
 
 function ensureWindows(display: Display): void {
@@ -101,10 +129,43 @@ function ensureWindows(display: Display): void {
 function setMode(mode: Mode): void {
   state.mode = mode
   windows.canvas?.setIgnoreMouseEvents(mode === 'pointer', { forward: true })
+  if (state.visible) {
+    if (windows.toolbar?.isVisible()) windows.toolbar.moveTop()
+    if (windows.composer?.isVisible()) windows.composer.moveTop()
+  }
   broadcast()
 }
 
+function refreshTrayMenu(): void {
+  if (!tray) return
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: state.visible ? 'Hide Perception' : 'Show Perception', click: () => state.visible ? hideOverlay() : showOverlay() },
+    { label: 'Settings…', click: openSettings },
+    { type: 'separator' },
+    { label: 'Quit Perception', click: () => app.quit() }
+  ]))
+}
+
+function openSettings(): void {
+  if (state.visible) hideOverlay()
+  if (!settingsWindow || settingsWindow.isDestroyed()) {
+    settingsWindow = new BrowserWindow({
+      width: 460, height: 248, show: false, resizable: false, minimizable: false,
+      title: 'Perception Settings', backgroundColor: '#f8faf8',
+      webPreferences: {
+        preload: join(__dirname, '../preload/index.js'),
+        contextIsolation: true, nodeIntegration: false, sandbox: false
+      }
+    })
+    loadView(settingsWindow, 'settings')
+    settingsWindow.on('closed', () => { settingsWindow = null })
+  }
+  settingsWindow.show()
+  settingsWindow.focus()
+}
+
 function showOverlay(): void {
+  settingsWindow?.hide()
   const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
   if (activeDisplay && activeDisplay.id !== display.id) {
     state.userRectangle = null
@@ -118,6 +179,9 @@ function showOverlay(): void {
   windows.toolbar?.showInactive()
   windows.composer?.show()
   windows.composer?.focus()
+  windows.toolbar?.moveTop()
+  windows.composer?.moveTop()
+  refreshTrayMenu()
   broadcast()
 }
 
@@ -125,6 +189,7 @@ function hideOverlay(): void {
   for (const win of Object.values(windows)) win?.hide()
   state.visible = false
   setMode('pointer')
+  refreshTrayMenu()
   broadcast()
 }
 
@@ -191,6 +256,8 @@ async function captureDisplay(): Promise<string> {
       windows.toolbar?.showInactive()
       windows.composer?.show()
       windows.composer?.focus()
+      windows.toolbar?.moveTop()
+      windows.composer?.moveTop()
     }
   }
 }
@@ -203,6 +270,7 @@ async function sendPrompt(text: string): Promise<void> {
   let imagePath: string | null = null
   state.messages.push({ id: randomUUID(), role: 'user', text: question })
   state.loading = true
+  suppressMarks = false
   updateStatus('Capturing the display…')
   try {
     imagePath = await captureDisplay()
@@ -243,7 +311,13 @@ function setupIpc(): void {
   ipcMain.on('overlay:set-rectangle', (_event, value: unknown) => { state.userRectangle = validRectangle(value); broadcast() })
   ipcMain.handle('overlay:send-prompt', async (_event, text: unknown) => { if (typeof text === 'string') await sendPrompt(text) })
   ipcMain.on('overlay:hide', hideOverlay)
-  ipcMain.on('overlay:clear', () => {
+  ipcMain.handle('overlay:clear', () => {
+    clearAnnotations(state)
+    suppressMarks = state.loading
+    setMode(state.mode)
+    updateStatus('Annotations cleared')
+  })
+  ipcMain.handle('overlay:new-conversation', () => {
     requestVersion += 1
     agent.cancel()
     agent.reset()
@@ -251,7 +325,37 @@ function setupIpc(): void {
     state.agentMarks = []
     state.messages = []
     state.loading = false
+    suppressMarks = false
+    setMode('pointer')
     updateStatus('Ready')
+  })
+  ipcMain.handle('overlay:set-shortcut', async (_event, shortcut: unknown): Promise<{ ok: boolean; error?: string }> => {
+    if (!validShortcut(shortcut)) return { ok: false, error: 'Use ⌘, Control, or Option with a letter, number, Space, or F key.' }
+    if (shortcut === preferences.shortcut && state.shortcutReady) return { ok: true }
+    let registered = false
+    try { registered = globalShortcut.register(shortcut, toggleOverlay) } catch { /* invalid or unavailable */ }
+    if (!registered) return { ok: false, error: 'That shortcut is unavailable. Try another combination.' }
+    if (state.shortcutReady) globalShortcut.unregister(preferences.shortcut)
+    preferences.shortcut = shortcut
+    state.shortcut = shortcut
+    state.shortcutReady = true
+    await savePreferences()
+    broadcast()
+    return { ok: true }
+  })
+  ipcMain.on('overlay:move-panel', (event, panel: unknown, dx: unknown, dy: unknown) => {
+    if (panel !== 'toolbar' && panel !== 'composer') return
+    const win = windows[panel]
+    if (!win || win.isDestroyed() || event.sender !== win.webContents) return
+    if (typeof dx !== 'number' || typeof dy !== 'number' || !Number.isFinite(dx) || !Number.isFinite(dy)) return
+    if (Math.abs(dx) > 1000 || Math.abs(dy) > 1000) return
+    const current = win.getBounds()
+    const display = activeDisplay.bounds
+    const x = Math.max(display.x + 12, Math.min(display.x + display.width - current.width - 12, Math.round(current.x + dx)))
+    const y = Math.max(display.y + 12, Math.min(display.y + display.height - current.height - 12, Math.round(current.y + dy)))
+    win.setPosition(x, y)
+    preferences.positions[panel] = boundsToPosition(display, win.getBounds())
+    queuePositionSave()
   })
   ipcMain.handle('overlay:choose-codex', async () => {
     const result = await dialog.showOpenDialog({ title: 'Choose Codex CLI', properties: ['openFile'] })
@@ -267,13 +371,39 @@ function setupIpc(): void {
   })
 }
 
+function toggleOverlay(): void {
+  if (state.visible) hideOverlay()
+  else showOverlay()
+}
+
+function trayIcon(): Electron.NativeImage {
+  const png = new PNG({ width: 32, height: 32 })
+  for (let y = 0; y < 32; y += 1) {
+    for (let x = 0; x < 32; x += 1) {
+      const distance = Math.hypot(x - 15.5, y - 15.5)
+      const ring = Math.max(0, Math.min(1, (distance - 10.4) * 2, (13.7 - distance) * 2))
+      const pupil = Math.max(0, Math.min(1, (5.2 - distance) * 2))
+      const offset = (y * 32 + x) * 4
+      png.data[offset] = 0
+      png.data[offset + 1] = 0
+      png.data[offset + 2] = 0
+      png.data[offset + 3] = Math.round(Math.max(ring, pupil) * 255)
+    }
+  }
+  const icon = nativeImage.createFromBuffer(PNG.sync.write(png), { scaleFactor: 2 })
+  icon.setTemplateImage(true)
+  return icon
+}
+
 app.whenReady().then(async () => {
   app.dock?.hide()
   activeDisplay = screen.getPrimaryDisplay()
   await mkdir(app.getPath('userData'), { recursive: true })
+  preferences = readPreferences(await readFile(join(app.getPath('userData'), 'preferences.json'), 'utf8').then(JSON.parse).catch(() => null))
+  state.shortcut = preferences.shortcut
   bridge = new DrawingBridge((mark: AgentMark | 'clear') => {
     if (mark === 'clear') state.agentMarks = []
-    else state.agentMarks.push(mark)
+    else if (!suppressMarks) state.agentMarks.push(mark)
     broadcast()
   })
   await bridge.start()
@@ -282,17 +412,20 @@ app.whenReady().then(async () => {
   agent = new CodexAgent(() => state.codexPath, bridge.socketPath, updateStatus)
   setupIpc()
 
-  tray = new Tray(nativeImage.createEmpty())
-  tray.setTitle('◎')
+  tray = new Tray(trayIcon())
   tray.setToolTip('Perception')
-  tray.setContextMenu(Menu.buildFromTemplate([
-    { label: 'Open Perception', click: showOverlay },
-    { label: 'Hide Perception', click: hideOverlay },
-    { type: 'separator' },
-    { label: 'Quit Perception', click: () => app.quit() }
-  ]))
+  refreshTrayMenu()
   tray.on('double-click', showOverlay)
-  state.shortcutReady = globalShortcut.register(SHORTCUT, () => state.visible ? hideOverlay() : showOverlay())
+  Menu.setApplicationMenu(Menu.buildFromTemplate([{
+    label: 'Perception',
+    submenu: [
+      { label: 'Show or Hide Overlay', click: toggleOverlay },
+      { label: 'Settings…', click: openSettings },
+      { type: 'separator' },
+      { role: 'quit' }
+    ]
+  }]))
+  try { state.shortcutReady = globalShortcut.register(preferences.shortcut, toggleOverlay) } catch { state.shortcutReady = false }
   if (!state.shortcutReady) updateStatus('Shortcut unavailable. Open from the menu bar.')
   else broadcast()
   screen.on('display-metrics-changed', () => {
@@ -311,6 +444,10 @@ app.whenReady().then(async () => {
 
 app.on('before-quit', () => {
   globalShortcut.unregisterAll()
+  if (positionSaveTimer) {
+    clearTimeout(positionSaveTimer)
+    void savePreferences()
+  }
   agent?.cancel()
   void bridge?.stop()
   for (const win of Object.values(windows)) win?.removeAllListeners('close')

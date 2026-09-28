@@ -13,9 +13,11 @@ pnpm install
 pnpm dev
 ```
 
-Perception starts with its overlay open. Press **⌘⇧Space** to show or hide it. You can also open it from the **◎** menu bar item. Press **Escape** or click the close button to dismiss it.
+Perception starts with its overlay open. Press **⌘⇧Space** to show or hide it. Use the menu bar icon to show or hide the overlay, open **Settings**, or quit the app. In **Settings**, click the shortcut and press a new combination. Press **Escape** or click the close button to dismiss the overlay.
 
-Click the rectangle button, then drag across the part of the screen you want to discuss. The orange rectangle appears on the live overlay and on the image sent with your next message. The pointer button lets you use the app beneath the overlay while keeping the conversation open. Send a prompt with **Return**; use **Shift-Return** for a new line. The agent's marks appear in teal. The clear button starts a new conversation.
+Click the rectangle button, then drag across the part of the screen you want to discuss. The orange rectangle appears on the live overlay and on the image sent with your next message. The pointer button lets you use the app beneath the overlay while keeping the conversation open. Send a prompt with **Return**; use **Shift-Return** for a new line. The agent's marks appear in teal. The toolbar's trash button clears annotations while keeping the conversation. Click **New chat** to start over.
+
+Drag the six dots on the toolbar or the chat box header to move that window. Perception saves both positions and uses them when you reopen the overlay.
 
 To build a macOS app bundle:
 

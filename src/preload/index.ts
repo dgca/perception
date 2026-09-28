@@ -12,9 +12,12 @@ const api: OverlayAPI = {
   setRectangle: (rectangle) => ipcRenderer.send('overlay:set-rectangle', rectangle),
   sendPrompt: (text) => ipcRenderer.invoke('overlay:send-prompt', text),
   hide: () => ipcRenderer.send('overlay:hide'),
-  clear: () => ipcRenderer.send('overlay:clear'),
+  clear: () => ipcRenderer.invoke('overlay:clear'),
+  newConversation: () => ipcRenderer.invoke('overlay:new-conversation'),
   chooseCodex: () => ipcRenderer.invoke('overlay:choose-codex'),
-  openScreenSettings: () => ipcRenderer.send('overlay:open-screen-settings')
+  openScreenSettings: () => ipcRenderer.send('overlay:open-screen-settings'),
+  setShortcut: (shortcut) => ipcRenderer.invoke('overlay:set-shortcut', shortcut),
+  movePanel: (panel, dx, dy) => ipcRenderer.send('overlay:move-panel', panel, dx, dy)
 }
 
 contextBridge.exposeInMainWorld('perception', api)

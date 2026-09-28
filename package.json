@@ -7,7 +7,7 @@
   "license": "MIT",
   "scripts": {
     "dev": "pnpm build:mcp && electron-vite dev",
-    "test": "esbuild tests/annotate-image.test.ts --bundle --platform=node --format=cjs --outfile=out/tests/annotate-image.test.cjs && node --test out/tests/annotate-image.test.cjs",
+    "test": "esbuild tests/*.test.ts --bundle --platform=node --format=cjs --outdir=out/tests && node --test out/tests/*.test.js",
     "typecheck": "tsc --noEmit",
     "build:mcp": "esbuild src/mcp/server.ts --bundle --platform=node --format=cjs --target=node22 --outfile=out/mcp/server.cjs",
     "build": "pnpm typecheck && electron-vite build && pnpm build:mcp",

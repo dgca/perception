@@ -11,6 +11,41 @@ function escapeHtml(value: string): string {
 
 function safe(value: number): number { return Math.max(0, Math.min(1, value)) }
 
+function shortcutLabel(shortcut: string): string {
+  return shortcut.replace('Command', '⌘').replace('Control', '⌃').replace('Alt', '⌥').replace('Shift', '⇧').replaceAll('+', '')
+}
+
+function shortcutFromKey(event: KeyboardEvent): string | null {
+  const key = /^Key[A-Z]$/.test(event.code) ? event.code.slice(3)
+    : /^Digit[0-9]$/.test(event.code) ? event.code.slice(5)
+      : event.code === 'Space' ? 'Space'
+        : /^F(?:[1-9]|1[0-2])$/.test(event.code) ? event.code
+          : null
+  if (!key || !(event.metaKey || event.ctrlKey || event.altKey)) return null
+  return [event.metaKey && 'Command', event.ctrlKey && 'Control', event.altKey && 'Alt', event.shiftKey && 'Shift', key].filter(Boolean).join('+')
+}
+
+function makeDraggable(handle: HTMLElement, panel: 'toolbar' | 'composer'): void {
+  let last: { x: number; y: number } | null = null
+  handle.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0 || (event.target instanceof Element && event.target.closest('button'))) return
+    event.preventDefault()
+    last = { x: event.screenX, y: event.screenY }
+    handle.setPointerCapture(event.pointerId)
+  })
+  handle.addEventListener('pointermove', (event) => {
+    if (!last) return
+    const dx = event.screenX - last.x
+    const dy = event.screenY - last.y
+    last = { x: event.screenX, y: event.screenY }
+    if (dx || dy) window.perception.movePanel(panel, dx, dy)
+  })
+  const stop = (): void => { last = null }
+  handle.addEventListener('pointerup', stop)
+  handle.addEventListener('pointercancel', stop)
+  handle.addEventListener('lostpointercapture', stop)
+}
+
 function setupCanvas(): void {
   document.body.className = 'canvas-body'
   app.innerHTML = '<svg id="canvas" aria-label="Screen annotations"><defs><marker id="arrowhead" markerWidth="12" markerHeight="10" refX="10" refY="5" orient="auto"><path d="M 0 0 L 12 5 L 0 10 z" fill="#41d5c1" /></marker></defs><g id="marks"></g><rect id="preview" hidden /></svg>'
@@ -95,17 +130,18 @@ function updateCanvas(next: OverlayState): void {
 function setupToolbar(): void {
   document.body.className = 'toolbar-body'
   app.innerHTML = `<div class="tool-panel" role="toolbar" aria-label="Annotation tools">
-    <div class="grip" aria-hidden="true">⠿</div>
+    <div class="grip" title="Drag toolbar" aria-label="Drag toolbar">⠿</div>
     <button id="pointer-tool" title="Pointer mode: use the app beneath" aria-label="Pointer mode"><svg viewBox="0 0 24 24"><path d="M5 3l2 16 4-5 4 7 3-2-4-7 7-1z"/></svg></button>
     <button id="rect-tool" title="Draw a rectangle" aria-label="Draw rectangle"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="2"/></svg></button>
     <div class="tool-separator"></div>
-    <button id="clear-tool" title="New conversation" aria-label="New conversation"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3m-9 0 1 13h10l1-13M10 10v7m4-7v7"/></svg></button>
+    <button id="clear-tool" title="Clear annotations" aria-label="Clear annotations"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3m-9 0 1 13h10l1-13M10 10v7m4-7v7"/></svg></button>
     <button id="hide-tool" title="Dismiss overlay" aria-label="Dismiss overlay"><svg viewBox="0 0 24 24"><path d="M5 5l14 14M19 5L5 19"/></svg></button>
   </div>`
   document.querySelector('#pointer-tool')!.addEventListener('click', () => window.perception.setMode('pointer'))
   document.querySelector('#rect-tool')!.addEventListener('click', () => window.perception.setMode('rectangle'))
-  document.querySelector('#clear-tool')!.addEventListener('click', () => window.perception.clear())
+  document.querySelector('#clear-tool')!.addEventListener('click', () => { void window.perception.clear() })
   document.querySelector('#hide-tool')!.addEventListener('click', () => window.perception.hide())
+  makeDraggable(document.querySelector<HTMLElement>('.grip')!, 'toolbar')
 }
 
 function updateToolbar(next: OverlayState): void {
@@ -116,9 +152,10 @@ function updateToolbar(next: OverlayState): void {
 function setupComposer(): void {
   document.body.className = 'composer-body'
   app.innerHTML = `<section class="composer" aria-label="Perception conversation">
+    <div class="composer-header"><div class="chat-grip" title="Drag chat box" aria-label="Drag chat box">⠿</div><span>Perception</span><button id="new-chat" class="header-button" title="Start a new conversation">New chat</button></div>
     <div class="conversation" id="conversation"><div class="empty-state">Ask about anything on this screen.<br><span>Draw a rectangle when you want to point at something.</span></div></div>
     <form id="prompt-form"><textarea id="prompt" rows="2" placeholder="What would you like to know?" aria-label="Message to agent"></textarea><button class="send-button" id="send" type="submit" aria-label="Send message"><svg viewBox="0 0 24 24"><path d="M12 19V5m0 0-6 6m6-6 6 6"/></svg></button></form>
-    <div class="composer-footer"><span id="status">Starting…</span><button id="choose-codex" class="text-button" hidden>Choose Codex CLI</button><button id="screen-settings" class="text-button" hidden>Screen Recording settings</button><span class="footer-hint">⌘⇧Space to hide</span></div>
+    <div class="composer-footer"><span id="status">Starting…</span><button id="choose-codex" class="text-button" hidden>Choose Codex CLI</button><button id="screen-settings" class="text-button" hidden>Screen Recording settings</button><span class="footer-hint" id="shortcut-hint"></span></div>
   </section>`
   const form = document.querySelector<HTMLFormElement>('#prompt-form')!
   const textarea = document.querySelector<HTMLTextAreaElement>('#prompt')!
@@ -137,6 +174,8 @@ function setupComposer(): void {
   })
   document.querySelector('#choose-codex')!.addEventListener('click', () => { void window.perception.chooseCodex() })
   document.querySelector('#screen-settings')!.addEventListener('click', () => window.perception.openScreenSettings())
+  document.querySelector('#new-chat')!.addEventListener('click', () => { void window.perception.newConversation() })
+  makeDraggable(document.querySelector<HTMLElement>('.composer-header')!, 'composer')
 }
 
 function updateComposer(next: OverlayState): void {
@@ -153,26 +192,85 @@ function updateComposer(next: OverlayState): void {
   document.querySelector<HTMLButtonElement>('#send')!.disabled = next.loading || !next.codexPath
   document.querySelector<HTMLButtonElement>('#choose-codex')!.hidden = Boolean(next.codexPath)
   document.querySelector<HTMLButtonElement>('#screen-settings')!.hidden = !next.messages.at(-1)?.text.includes('Screen Recording permission is needed')
+  document.querySelector('#shortcut-hint')!.textContent = `${shortcutLabel(next.shortcut)} to hide`
+}
+
+function setupSettings(): void {
+  document.body.className = 'settings-body'
+  app.innerHTML = `<section class="settings-panel" aria-label="Perception settings">
+    <h1>Settings</h1>
+    <div class="setting-row"><div><strong>Show or hide overlay</strong><p>Works while you are in another app.</p></div><button id="shortcut-input" class="shortcut-input" aria-label="Record shortcut">⌘⇧Space</button></div>
+    <p class="settings-help">Click the shortcut, then press a new combination. Use ⌘, Control, or Option with a letter, number, Space, or F key.</p>
+    <div class="settings-actions"><span id="shortcut-result" role="status"></span><button id="reset-shortcut" class="reset-button">Reset default</button></div>
+  </section>`
+  const button = document.querySelector<HTMLButtonElement>('#shortcut-input')!
+  const result = document.querySelector<HTMLSpanElement>('#shortcut-result')!
+  let recording = false
+  button.addEventListener('click', () => {
+    recording = true
+    button.textContent = 'Press shortcut…'
+    result.textContent = ''
+  })
+  button.addEventListener('blur', () => {
+    recording = false
+    if (state) button.textContent = shortcutLabel(state.shortcut)
+  })
+  button.addEventListener('keydown', (event) => {
+    if (!recording) return
+    if (event.key === 'Tab') return
+    event.preventDefault()
+    event.stopPropagation()
+    if (event.key === 'Escape') {
+      recording = false
+      if (state) button.textContent = shortcutLabel(state.shortcut)
+      return
+    }
+    const shortcut = shortcutFromKey(event)
+    if (!shortcut) {
+      if (!['Meta', 'Control', 'Alt', 'Shift'].includes(event.key)) result.textContent = 'Use a supported key and modifier.'
+      return
+    }
+    recording = false
+    void window.perception.setShortcut(shortcut).then((response) => {
+      result.textContent = response.ok ? 'Shortcut saved.' : response.error ?? 'Could not save shortcut.'
+      if (state) button.textContent = shortcutLabel(state.shortcut)
+    })
+  })
+  document.querySelector('#reset-shortcut')!.addEventListener('click', () => {
+    void window.perception.setShortcut('Command+Shift+Space').then((response) => {
+      result.textContent = response.ok ? 'Default shortcut restored.' : response.error ?? 'Could not restore shortcut.'
+      if (state) button.textContent = shortcutLabel(state.shortcut)
+    })
+  })
+}
+
+function updateSettings(next: OverlayState): void {
+  const button = document.querySelector<HTMLButtonElement>('#shortcut-input')!
+  if (button.textContent !== 'Press shortcut…') button.textContent = shortcutLabel(next.shortcut)
+  if (!next.shortcutReady) document.querySelector('#shortcut-result')!.textContent = 'Current shortcut is unavailable. Record another.'
 }
 
 if (view === 'canvas') setupCanvas()
 else if (view === 'toolbar') setupToolbar()
+else if (view === 'settings') setupSettings()
 else setupComposer()
 
 window.perception.onState((next) => {
   state = next
   if (view === 'canvas') updateCanvas(next)
   else if (view === 'toolbar') updateToolbar(next)
+  else if (view === 'settings') updateSettings(next)
   else updateComposer(next)
 })
 void window.perception.getState().then((next) => {
   state = next
   if (view === 'canvas') updateCanvas(next)
   else if (view === 'toolbar') updateToolbar(next)
+  else if (view === 'settings') updateSettings(next)
   else updateComposer(next)
 })
 
 window.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape') window.perception.hide()
+  if (view !== 'settings' && event.key === 'Escape') window.perception.hide()
 })
 window.addEventListener('resize', () => { if (view === 'canvas' && state) updateCanvas(state) })

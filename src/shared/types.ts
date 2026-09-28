@@ -23,6 +23,7 @@ export type OverlayState = {
   loading: boolean
   status: string
   codexPath: string | null
+  shortcut: string
   shortcutReady: boolean
 }
 
@@ -33,7 +34,10 @@ export type OverlayAPI = {
   setRectangle(rectangle: Rectangle | null): void
   sendPrompt(text: string): Promise<void>
   hide(): void
-  clear(): void
+  clear(): Promise<void>
+  newConversation(): Promise<void>
   chooseCodex(): Promise<void>
   openScreenSettings(): void
+  setShortcut(shortcut: string): Promise<{ ok: boolean; error?: string }>
+  movePanel(panel: 'toolbar' | 'composer', dx: number, dy: number): void
 }
