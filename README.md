@@ -6,7 +6,7 @@ The app uses Electron and TypeScript. It sends a capture of the active display t
 
 ## Run the prototype
 
-You need macOS, Node.js 22 or newer, pnpm, and a signed-in Codex CLI. Perception looks for `codex` on your `PATH` and in common install locations. If it does not find Codex, choose the executable in the prompt window.
+You need macOS, Xcode Command Line Tools, Node.js 22 or newer, pnpm, and a signed-in Codex CLI. Perception uses the macOS compiler to build its window lookup helper. Perception looks for `codex` on your `PATH` and in common install locations. If it does not find Codex, choose the executable in the prompt window.
 
 ```sh
 pnpm install
@@ -16,6 +16,8 @@ pnpm dev
 Perception starts with its overlay open. Press **⌘⇧Space** to show or hide it. Use the menu bar icon to show or hide the overlay, open **Settings**, or quit the app. In **Settings**, click the shortcut and press a new combination. You can also edit the developer instructions sent to Codex, save them, or restore the default. Changes apply to the next message. Press **Escape** or click the close button to dismiss the overlay.
 
 Click the rectangle button, then drag across the part of the screen you want to discuss. The orange rectangle appears on the live overlay and on the image sent with your next message. The pointer button lets you use the app beneath the overlay while keeping the conversation open. Send a prompt with **Return**; use **Shift-Return** for a new line. The agent's marks appear in teal. The toolbar's trash button clears annotations while keeping the conversation. Click **New chat** to start over.
+
+With a rectangle, Perception tells the agent which app window was under its center when the screenshot was taken. Without one, it reports the topmost ordinary app window on the captured display. It checks again for every message. It identifies the macOS app, so a ChatGPT tab in Chrome is identified as Chrome. If macOS cannot identify the window, Perception sends the screenshot without an app label.
 
 Drag the six dots on the toolbar or the chat box header to move that window. Perception saves both positions and uses them when you reopen the overlay.
 
@@ -30,6 +32,7 @@ The bundle is at `dist/mac-arm64/Perception.app` on Apple silicon. It is unsigne
 ## What the prototype does
 
 - Captures the display under the pointer when you send a prompt. Perception hides its own windows during capture.
+- Reads the visible app window near capture time and sends its name and bundle ID as context for that request. It does not read window titles.
 - Adds your selected rectangle to the image and tells the agent its coordinates.
 - Shows the agent's text in the prompt window and its marks on the live canvas.
 - Keeps a Codex conversation for follow-up prompts until you clear it or quit.
