@@ -7,7 +7,8 @@ const point = { type: 'number', minimum: 0, maximum: 1 }
 const tools = [
   {
     name: 'draw_rectangle',
-    description: 'Draw a rectangle around a visible region of the current display. Coordinates are fractions of the full screenshot, with (0,0) at its top left. Use this to point back to a control or area.',
+    description:
+      'Draw a rectangle around a visible region of the current display. Coordinates are fractions of the full screenshot, with (0,0) at its top left. Use this to point back to a control or area.',
     annotations: { destructiveHint: false, openWorldHint: false },
     inputSchema: {
       type: 'object',

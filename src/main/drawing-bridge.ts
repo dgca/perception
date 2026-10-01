@@ -1,4 +1,4 @@
-import { createServer, type Server } from 'node:net'
+import { createServer, type Server, type Socket } from 'node:net'
 import { chmod, unlink } from 'node:fs/promises'
 import { randomBytes, randomUUID } from 'node:crypto'
 import type { AgentMark } from '../shared/types'
@@ -36,8 +36,12 @@ function parseCommand(raw: DrawingCommand): AgentMark | 'clear' {
     }
     case 'draw_arrow':
       return {
-        id: randomUUID(), kind: 'arrow',
-        fromX: number(a.fromX), fromY: number(a.fromY), toX: number(a.toX), toY: number(a.toY),
+        id: randomUUID(),
+        kind: 'arrow',
+        fromX: number(a.fromX),
+        fromY: number(a.fromY),
+        toX: number(a.toX),
+        toY: number(a.toY),
         label: optionalLabel(a.label)
       }
     case 'add_label':
@@ -52,11 +56,14 @@ function parseCommand(raw: DrawingCommand): AgentMark | 'clear' {
 export class DrawingBridge {
   readonly socketPath = `/tmp/perception-${process.pid}-${randomBytes(5).toString('hex')}.sock`
   private server: Server | null = null
+  private sockets = new Set<Socket>()
 
   constructor(private readonly onMark: (mark: AgentMark | 'clear') => void) {}
 
   async start(): Promise<void> {
     this.server = createServer((socket) => {
+      this.sockets.add(socket)
+      socket.on('close', () => this.sockets.delete(socket))
       let buffer = ''
       socket.setTimeout(3000, () => socket.destroy())
       socket.on('data', (chunk: Buffer) => {
@@ -87,7 +94,12 @@ export class DrawingBridge {
   }
 
   async stop(): Promise<void> {
-    this.server?.close()
+    for (const socket of this.sockets) socket.destroy()
+    await new Promise<void>((resolve) => {
+      if (!this.server) return resolve()
+      this.server.close(() => resolve())
+      this.server = null
+    })
     await unlink(this.socketPath).catch(() => {})
   }
 }

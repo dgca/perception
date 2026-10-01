@@ -1,25 +1,40 @@
-import type { AgentMark, OverlayState, Rectangle } from '../shared/types'
+import type { OverlayState, Rectangle } from '../shared/types'
+import { DEFAULT_DEVELOPER_INSTRUCTIONS } from '../main/preferences'
+import { markSvg, normalizedPointer, rectSvg, rectanglePixels, type CanvasGeometry } from './annotations'
 import './style.css'
 
 const app = document.querySelector<HTMLDivElement>('#app')!
 const view = new URLSearchParams(location.search).get('view') ?? 'composer'
 let state: OverlayState | null = null
+const labelContext = view === 'canvas' ? document.createElement('canvas').getContext('2d') : null
+if (labelContext) labelContext.font = '650 13px -apple-system, BlinkMacSystemFont, sans-serif'
 
 function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!)
 }
 
-function safe(value: number): number { return Math.max(0, Math.min(1, value)) }
+function canvasGeometry(next: OverlayState | null = state): CanvasGeometry {
+  const fallback = { x: window.screenX, y: window.screenY, width: innerWidth, height: innerHeight }
+  return { display: next?.displayBounds ?? fallback, canvas: next?.canvasBounds ?? fallback }
+}
+
+function measureLabel(text: string): number {
+  return labelContext?.measureText(text).width ?? text.length * 7.6
+}
 
 function shortcutLabel(shortcut: string): string {
   return shortcut.replace('Command', '⌘').replace('Control', '⌃').replace('Alt', '⌥').replace('Shift', '⇧').replaceAll('+', '')
 }
 
 function shortcutFromKey(event: KeyboardEvent): string | null {
-  const key = /^Key[A-Z]$/.test(event.code) ? event.code.slice(3)
-    : /^Digit[0-9]$/.test(event.code) ? event.code.slice(5)
-      : event.code === 'Space' ? 'Space'
-        : /^F(?:[1-9]|1[0-2])$/.test(event.code) ? event.code
+  const key = /^Key[A-Z]$/.test(event.code)
+    ? event.code.slice(3)
+    : /^Digit[0-9]$/.test(event.code)
+      ? event.code.slice(5)
+      : event.code === 'Space'
+        ? 'Space'
+        : /^F(?:[1-9]|1[0-2])$/.test(event.code)
+          ? event.code
           : null
   if (!key || !(event.metaKey || event.ctrlKey || event.altKey)) return null
   return [event.metaKey && 'Command', event.ctrlKey && 'Control', event.altKey && 'Alt', event.shiftKey && 'Shift', key].filter(Boolean).join('+')
@@ -40,7 +55,9 @@ function makeDraggable(handle: HTMLElement, panel: 'toolbar' | 'composer'): void
     last = { x: event.screenX, y: event.screenY }
     if (dx || dy) window.perception.movePanel(panel, dx, dy)
   })
-  const stop = (): void => { last = null }
+  const stop = (): void => {
+    last = null
+  }
   handle.addEventListener('pointerup', stop)
   handle.addEventListener('pointercancel', stop)
   handle.addEventListener('lostpointercapture', stop)
@@ -48,12 +65,13 @@ function makeDraggable(handle: HTMLElement, panel: 'toolbar' | 'composer'): void
 
 function setupCanvas(): void {
   document.body.className = 'canvas-body'
-  app.innerHTML = '<svg id="canvas" aria-label="Screen annotations"><defs><marker id="arrowhead" markerWidth="12" markerHeight="10" refX="10" refY="5" orient="auto"><path d="M 0 0 L 12 5 L 0 10 z" fill="#41d5c1" /></marker></defs><g id="marks"></g><rect id="preview" hidden /></svg>'
+  app.innerHTML =
+    '<svg id="canvas" aria-label="Screen annotations"><defs><marker id="arrowhead" markerWidth="12" markerHeight="10" refX="10" refY="5" orient="auto"><path d="M 0 0 L 12 5 L 0 10 z" fill="#41d5c1" /></marker></defs><g id="marks"></g><rect id="preview" hidden /></svg>'
   const svg = document.querySelector<SVGSVGElement>('#canvas')!
   const preview = document.querySelector<SVGRectElement>('#preview')!
   let origin: { x: number; y: number } | null = null
 
-  const position = (event: PointerEvent): { x: number; y: number } => ({ x: safe(event.clientX / innerWidth), y: safe(event.clientY / innerHeight) })
+  const position = (event: PointerEvent): { x: number; y: number } => normalizedPointer(event.clientX, event.clientY, canvasGeometry())
   svg.addEventListener('pointerdown', (event) => {
     if (state?.mode !== 'rectangle' || event.button !== 0) return
     origin = position(event)
@@ -67,17 +85,28 @@ function setupCanvas(): void {
   svg.addEventListener('pointermove', (event) => {
     if (!origin) return
     const now = position(event)
-    preview.setAttribute('x', String(Math.min(origin.x, now.x) * innerWidth))
-    preview.setAttribute('y', String(Math.min(origin.y, now.y) * innerHeight))
-    preview.setAttribute('width', String(Math.abs(origin.x - now.x) * innerWidth))
-    preview.setAttribute('height', String(Math.abs(origin.y - now.y) * innerHeight))
+    const pixels = rectanglePixels(
+      {
+        x: Math.min(origin.x, now.x),
+        y: Math.min(origin.y, now.y),
+        width: Math.abs(origin.x - now.x),
+        height: Math.abs(origin.y - now.y)
+      },
+      canvasGeometry()
+    )
+    preview.setAttribute('x', String(pixels.x))
+    preview.setAttribute('y', String(pixels.y))
+    preview.setAttribute('width', String(pixels.width))
+    preview.setAttribute('height', String(pixels.height))
   })
   const end = (event: PointerEvent): void => {
     if (!origin) return
     const now = position(event)
     const rectangle: Rectangle = {
-      x: Math.min(origin.x, now.x), y: Math.min(origin.y, now.y),
-      width: Math.abs(origin.x - now.x), height: Math.abs(origin.y - now.y)
+      x: Math.min(origin.x, now.x),
+      y: Math.min(origin.y, now.y),
+      width: Math.abs(origin.x - now.x),
+      height: Math.abs(origin.y - now.y)
     }
     origin = null
     preview.setAttribute('hidden', '')
@@ -87,43 +116,19 @@ function setupCanvas(): void {
     }
   }
   svg.addEventListener('pointerup', end)
-  svg.addEventListener('pointercancel', () => { origin = null; preview.setAttribute('hidden', '') })
-}
-
-function rectSvg(rectangle: Rectangle, className: string, label?: string): string {
-  const x = rectangle.x * innerWidth
-  const y = rectangle.y * innerHeight
-  const width = rectangle.width * innerWidth
-  const height = rectangle.height * innerHeight
-  return `<rect class="${className}" x="${x}" y="${y}" width="${width}" height="${height}" rx="8" />${label ? labelSvg(x, y - 8, label) : ''}`
-}
-
-function labelSvg(x: number, y: number, text: string): string {
-  const label = escapeHtml(text.slice(0, 120))
-  const width = Math.min(400, Math.max(60, text.length * 7.6 + 22))
-  const left = Math.min(Math.max(8, x), innerWidth - width - 8)
-  const top = Math.min(Math.max(27, y), innerHeight - 8)
-  return `<g class="agent-label" transform="translate(${left}, ${top})"><rect x="0" y="-24" width="${width}" height="28" rx="8"/><text x="10" y="-6">${label}</text></g>`
-}
-
-function markSvg(mark: AgentMark): string {
-  if (mark.kind === 'rectangle') return rectSvg(mark, 'agent-rect', mark.label)
-  if (mark.kind === 'arrow') {
-    const x1 = mark.fromX * innerWidth
-    const y1 = mark.fromY * innerHeight
-    const x2 = mark.toX * innerWidth
-    const y2 = mark.toY * innerHeight
-    return `<line class="agent-arrow" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" marker-end="url(#arrowhead)" />${mark.label ? labelSvg(x1, y1 - 8, mark.label) : ''}`
-  }
-  return labelSvg(mark.x * innerWidth, mark.y * innerHeight, mark.text)
+  svg.addEventListener('pointercancel', () => {
+    origin = null
+    preview.setAttribute('hidden', '')
+  })
 }
 
 function updateCanvas(next: OverlayState): void {
   document.body.classList.toggle('drawing', next.mode === 'rectangle')
   const marks = document.querySelector<SVGGElement>('#marks')!
+  const geometry = canvasGeometry(next)
   marks.innerHTML = [
-    ...next.agentMarks.map(markSvg),
-    next.userRectangle ? rectSvg(next.userRectangle, 'user-rect') : ''
+    ...next.agentMarks.map((mark) => markSvg(mark, geometry, measureLabel)),
+    next.userRectangle ? rectSvg(next.userRectangle, 'user-rect', geometry) : ''
   ].join('')
 }
 
@@ -139,7 +144,9 @@ function setupToolbar(): void {
   </div>`
   document.querySelector('#pointer-tool')!.addEventListener('click', () => window.perception.setMode('pointer'))
   document.querySelector('#rect-tool')!.addEventListener('click', () => window.perception.setMode('rectangle'))
-  document.querySelector('#clear-tool')!.addEventListener('click', () => { void window.perception.clear() })
+  document.querySelector('#clear-tool')!.addEventListener('click', () => {
+    void window.perception.clear()
+  })
   document.querySelector('#hide-tool')!.addEventListener('click', () => window.perception.hide())
   makeDraggable(document.querySelector<HTMLElement>('.grip')!, 'toolbar')
 }
@@ -172,9 +179,13 @@ function setupComposer(): void {
       form.requestSubmit()
     }
   })
-  document.querySelector('#choose-codex')!.addEventListener('click', () => { void window.perception.chooseCodex() })
+  document.querySelector('#choose-codex')!.addEventListener('click', () => {
+    void window.perception.chooseCodex()
+  })
   document.querySelector('#screen-settings')!.addEventListener('click', () => window.perception.openScreenSettings())
-  document.querySelector('#new-chat')!.addEventListener('click', () => { void window.perception.newConversation() })
+  document.querySelector('#new-chat')!.addEventListener('click', () => {
+    void window.perception.newConversation()
+  })
   makeDraggable(document.querySelector<HTMLElement>('.composer-header')!, 'composer')
 }
 
@@ -183,7 +194,12 @@ function updateComposer(next: OverlayState): void {
   const latest = next.messages.map((message) => message.id).join(',') + `:${next.loading}`
   if (conversation.dataset.renderKey !== latest) {
     conversation.innerHTML = next.messages.length
-      ? next.messages.map((message) => `<div class="message ${message.role}"><span class="role">${message.role === 'user' ? 'You' : 'Agent'}</span><p>${escapeHtml(message.text)}</p></div>`).join('') + (next.loading ? '<div class="thinking"><span></span><span></span><span></span></div>' : '')
+      ? next.messages
+          .map(
+            (message) =>
+              `<div class="message ${message.role}"><span class="role">${message.role === 'user' ? 'You' : 'Agent'}</span><p>${escapeHtml(message.text)}</p></div>`
+          )
+          .join('') + (next.loading ? '<div class="thinking"><span></span><span></span><span></span></div>' : '')
       : '<div class="empty-state">Ask about anything on this screen.<br><span>Draw a rectangle when you want to point at something.</span></div>'
     conversation.dataset.renderKey = latest
     conversation.scrollTop = conversation.scrollHeight
@@ -202,6 +218,11 @@ function setupSettings(): void {
     <div class="setting-row"><div><strong>Show or hide overlay</strong><p>Works while you are in another app.</p></div><button id="shortcut-input" class="shortcut-input" aria-label="Record shortcut">⌘⇧Space</button></div>
     <p class="settings-help">Click the shortcut, then press a new combination. Use ⌘, Control, or Option with a letter, number, Space, or F key.</p>
     <div class="settings-actions"><span id="shortcut-result" role="status"></span><button id="reset-shortcut" class="reset-button">Reset default</button></div>
+    <div class="settings-divider"></div>
+    <label class="instructions-label" for="developer-instructions">Developer instructions</label>
+    <p class="instructions-help">Sent to Codex with each request. Edits apply to the next message.</p>
+    <textarea id="developer-instructions" maxlength="10000" spellcheck="false" aria-label="Developer instructions"></textarea>
+    <div class="settings-actions"><span id="instructions-result" role="status"></span><div class="settings-buttons"><button id="reset-instructions" class="reset-button">Reset default</button><button id="save-instructions" class="save-button">Save</button></div></div>
   </section>`
   const button = document.querySelector<HTMLButtonElement>('#shortcut-input')!
   const result = document.querySelector<HTMLSpanElement>('#shortcut-result')!
@@ -232,15 +253,35 @@ function setupSettings(): void {
     }
     recording = false
     void window.perception.setShortcut(shortcut).then((response) => {
-      result.textContent = response.ok ? 'Shortcut saved.' : response.error ?? 'Could not save shortcut.'
+      result.textContent = response.ok ? 'Shortcut saved.' : (response.error ?? 'Could not save shortcut.')
       if (state) button.textContent = shortcutLabel(state.shortcut)
     })
   })
   document.querySelector('#reset-shortcut')!.addEventListener('click', () => {
     void window.perception.setShortcut('Command+Shift+Space').then((response) => {
-      result.textContent = response.ok ? 'Default shortcut restored.' : response.error ?? 'Could not restore shortcut.'
+      result.textContent = response.ok ? 'Default shortcut restored.' : (response.error ?? 'Could not restore shortcut.')
       if (state) button.textContent = shortcutLabel(state.shortcut)
     })
+  })
+  const instructions = document.querySelector<HTMLTextAreaElement>('#developer-instructions')!
+  const instructionsResult = document.querySelector<HTMLSpanElement>('#instructions-result')!
+  const saveInstructions = (value: string, success: string): void => {
+    void window.perception
+      .setDeveloperInstructions(value)
+      .then((response) => {
+        instructionsResult.textContent = response.ok ? success : (response.error ?? 'Could not save instructions.')
+      })
+      .catch(() => {
+        instructionsResult.textContent = 'Could not save instructions.'
+      })
+  }
+  instructions.addEventListener('input', () => {
+    instructionsResult.textContent = ''
+  })
+  document.querySelector('#save-instructions')!.addEventListener('click', () => saveInstructions(instructions.value, 'Instructions saved.'))
+  document.querySelector('#reset-instructions')!.addEventListener('click', () => {
+    instructions.value = DEFAULT_DEVELOPER_INSTRUCTIONS
+    saveInstructions(instructions.value, 'Default instructions restored.')
   })
 }
 
@@ -248,6 +289,8 @@ function updateSettings(next: OverlayState): void {
   const button = document.querySelector<HTMLButtonElement>('#shortcut-input')!
   if (button.textContent !== 'Press shortcut…') button.textContent = shortcutLabel(next.shortcut)
   if (!next.shortcutReady) document.querySelector('#shortcut-result')!.textContent = 'Current shortcut is unavailable. Record another.'
+  const instructions = document.querySelector<HTMLTextAreaElement>('#developer-instructions')!
+  if (document.activeElement !== instructions && instructions.value !== next.developerInstructions) instructions.value = next.developerInstructions
 }
 
 if (view === 'canvas') setupCanvas()
@@ -273,4 +316,6 @@ void window.perception.getState().then((next) => {
 window.addEventListener('keydown', (event) => {
   if (view !== 'settings' && event.key === 'Escape') window.perception.hide()
 })
-window.addEventListener('resize', () => { if (view === 'canvas' && state) updateCanvas(state) })
+window.addEventListener('resize', () => {
+  if (view === 'canvas' && state) updateCanvas(state)
+})

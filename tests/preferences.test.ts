@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { boundsToPosition, DEFAULT_SHORTCUT, positionToBounds, readPreferences, validShortcut } from '../src/main/preferences'
+import {
+  boundsToPosition,
+  DEFAULT_DEVELOPER_INSTRUCTIONS,
+  DEFAULT_SHORTCUT,
+  positionToBounds,
+  readPreferences,
+  validDeveloperInstructions,
+  validShortcut
+} from '../src/main/preferences'
 
 test('shortcuts require a non-shift modifier and a supported key', () => {
   assert.equal(validShortcut('Command+Shift+Space'), true)
@@ -14,8 +22,17 @@ test('shortcuts require a non-shift modifier and a supported key', () => {
 test('invalid saved preferences fall back without losing valid positions', () => {
   assert.deepEqual(readPreferences({ shortcut: 'Shift+K', positions: { toolbar: { x: 0.8, y: 0.2 }, composer: { x: 20, y: 0 } } }), {
     shortcut: DEFAULT_SHORTCUT,
+    developerInstructions: DEFAULT_DEVELOPER_INSTRUCTIONS,
     positions: { toolbar: { x: 0.8, y: 0.2 }, composer: null }
   })
+})
+
+test('developer instructions preserve edits and reject oversized saved values', () => {
+  assert.equal(readPreferences({ developerInstructions: 'Use brief answers.' }).developerInstructions, 'Use brief answers.')
+  assert.equal(readPreferences({ developerInstructions: '' }).developerInstructions, '')
+  assert.equal(readPreferences({ developerInstructions: 'x'.repeat(10001) }).developerInstructions, DEFAULT_DEVELOPER_INSTRUCTIONS)
+  assert.equal(validDeveloperInstructions('x'.repeat(10000)), true)
+  assert.equal(validDeveloperInstructions('x'.repeat(10001)), false)
 })
 
 test('panel positions remain on the current display', () => {

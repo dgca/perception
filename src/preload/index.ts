@@ -17,6 +17,7 @@ const api: OverlayAPI = {
   chooseCodex: () => ipcRenderer.invoke('overlay:choose-codex'),
   openScreenSettings: () => ipcRenderer.send('overlay:open-screen-settings'),
   setShortcut: (shortcut) => ipcRenderer.invoke('overlay:set-shortcut', shortcut),
+  setDeveloperInstructions: (instructions) => ipcRenderer.invoke('overlay:set-developer-instructions', instructions),
   movePanel: (panel, dx, dy) => ipcRenderer.send('overlay:move-panel', panel, dx, dy)
 }
 

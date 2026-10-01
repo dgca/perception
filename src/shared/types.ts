@@ -7,6 +7,8 @@ export type Rectangle = {
   height: number
 }
 
+export type ScreenBounds = { x: number; y: number; width: number; height: number }
+
 export type AgentMark =
   | ({ id: string; kind: 'rectangle'; label?: string } & Rectangle)
   | { id: string; kind: 'arrow'; fromX: number; fromY: number; toX: number; toY: number; label?: string }
@@ -25,6 +27,9 @@ export type OverlayState = {
   codexPath: string | null
   shortcut: string
   shortcutReady: boolean
+  developerInstructions: string
+  displayBounds: ScreenBounds | null
+  canvasBounds: ScreenBounds | null
 }
 
 export type OverlayAPI = {
@@ -39,5 +44,6 @@ export type OverlayAPI = {
   chooseCodex(): Promise<void>
   openScreenSettings(): void
   setShortcut(shortcut: string): Promise<{ ok: boolean; error?: string }>
+  setDeveloperInstructions(instructions: string): Promise<{ ok: boolean; error?: string }>
   movePanel(panel: 'toolbar' | 'composer', dx: number, dy: number): void
 }

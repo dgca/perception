@@ -13,7 +13,7 @@ pnpm install
 pnpm dev
 ```
 
-Perception starts with its overlay open. Press **⌘⇧Space** to show or hide it. Use the menu bar icon to show or hide the overlay, open **Settings**, or quit the app. In **Settings**, click the shortcut and press a new combination. Press **Escape** or click the close button to dismiss the overlay.
+Perception starts with its overlay open. Press **⌘⇧Space** to show or hide it. Use the menu bar icon to show or hide the overlay, open **Settings**, or quit the app. In **Settings**, click the shortcut and press a new combination. You can also edit the developer instructions sent to Codex, save them, or restore the default. Changes apply to the next message. Press **Escape** or click the close button to dismiss the overlay.
 
 Click the rectangle button, then drag across the part of the screen you want to discuss. The orange rectangle appears on the live overlay and on the image sent with your next message. The pointer button lets you use the app beneath the overlay while keeping the conversation open. Send a prompt with **Return**; use **Shift-Return** for a new line. The agent's marks appear in teal. The toolbar's trash button clears annotations while keeping the conversation. Click **New chat** to start over.
 
@@ -34,13 +34,18 @@ The bundle is at `dist/mac-arm64/Perception.app` on Apple silicon. It is unsigne
 - Shows the agent's text in the prompt window and its marks on the live canvas.
 - Keeps a Codex conversation for follow-up prompts until you clear it or quit.
 
-Perception removes each temporary capture after Codex finishes the request. The current conversation and marks live in app memory; the Codex CLI handles its own session storage and model communication. The agent runs with a read-only file sandbox and has no computer-control tool. The prototype covers one display at a time, does not track UI elements as they move, and has no model picker or accessibility inspection yet.
+Perception writes captures to a private directory, removes them after each request, and clears any left by a previous run at startup. The current conversation and marks live in app memory; the Codex CLI handles its own session storage and model communication. The agent runs with a read-only file sandbox and has no computer-control tool. The prototype covers one display at a time, does not track UI elements as they move, and has no model picker or accessibility inspection yet.
+
+## Harness interface
+
+`Conversation` owns the request lifecycle, capture cleanup, conversation reset, and which status updates and marks may reach the overlay. It creates a `HarnessSession` for each conversation. The session's `ask` method receives a prompt, image path, cancellation signal, and callbacks for status and drawing. `CodexAgent` is the current adapter: it owns the Codex CLI process, Codex thread ID, and a drawing MCP socket for each request. A new harness implements `HarnessSession` and handles its own process, conversation ID, and tool transport. The request lifecycle and capture code do not depend on those details. The current settings UI remains Codex-specific.
 
 ## Check the build
 
 ```sh
 pnpm typecheck
 pnpm test
+pnpm lint
 pnpm build
 ```
 

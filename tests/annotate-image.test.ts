@@ -6,9 +6,14 @@ import { annotateImage } from '../src/main/annotate-image.ts'
 test('the selected region is drawn onto the capture sent to the agent', () => {
   const image = new PNG({ width: 100, height: 100 })
   image.data.fill(0)
-  const result = PNG.sync.read(annotateImage(PNG.sync.write(image), {
-    x: 0.2, y: 0.3, width: 0.4, height: 0.2
-  }))
+  const result = PNG.sync.read(
+    annotateImage(PNG.sync.write(image), {
+      x: 0.2,
+      y: 0.3,
+      width: 0.4,
+      height: 0.2
+    })
+  )
 
   function rgba(x: number, y: number): number[] {
     const offset = (result.width * y + x) * 4

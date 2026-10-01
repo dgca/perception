@@ -8,12 +8,15 @@
   "scripts": {
     "dev": "pnpm build:mcp && electron-vite dev",
     "test": "esbuild tests/*.test.ts --bundle --platform=node --format=cjs --outdir=out/tests && node --test out/tests/*.test.js",
+    "lint": "biome check . --diagnostic-level=error",
+    "format": "biome format --write .",
     "typecheck": "tsc --noEmit",
     "build:mcp": "esbuild src/mcp/server.ts --bundle --platform=node --format=cjs --target=node22 --outfile=out/mcp/server.cjs",
     "build": "pnpm typecheck && electron-vite build && pnpm build:mcp",
     "package:mac": "pnpm build && electron-builder --mac dir"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.5.14",
     "@types/node": "^24.0.0",
     "@types/pngjs": "^6.0.5",
     "electron": "^39.0.0",
@@ -45,7 +48,10 @@
   },
   "packageManager": "pnpm@10.21.0",
   "pnpm": {
-    "onlyBuiltDependencies": ["electron", "esbuild"]
+    "onlyBuiltDependencies": [
+      "electron",
+      "esbuild"
+    ]
   },
   "dependencies": {
     "pngjs": "^7.0.0"
