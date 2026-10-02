@@ -4,16 +4,16 @@
 
 Implementation follows the accepted intent, spec, and plan on codex/separate-request-inputs, based on the PR #1 merge ede17738458ae68778f723b7576cf8b328928533.
 
-All implementation checks below passed. Independent review and PR preparation are the remaining workflow stages. Their final results will be recorded after those stages run.
+The first independent review found one Settings draft-retention race. The revision below fixes it, with a regression test and a rendered delayed-save check. Fresh review and PR preparation remain pending.
 
 ## Automated checks
 
-- pnpm lint: passed, 36 files checked, no errors.
-- pnpm test: passed, 36 tests, zero failures, cancellations, or skipped tests.
+- pnpm lint: passed, 37 files checked, no errors.
+- pnpm test: passed, 39 tests, zero failures, cancellations, or skipped tests.
 - pnpm package:mac: passed, including tsc --noEmit, Electron main/preload/renderer builds, MCP build, macOS window-list compilation, and arm64 app packaging.
 - git diff --check: passed.
 
-The final production-code run of lint, tests, and packaging followed the saved-value publishing change and 600-pixel Settings layout. A formatting error on an earlier lint run was corrected before the final checks.
+The final production-code run of lint, tests, and packaging followed the stale-save revision, saved-value publishing change, and 600-pixel Settings layout. A formatting error on an earlier lint run was corrected before the final checks.
 
 Packaging produced dist/mac-arm64/Perception.app. Confirmed app.asar exists, out/mcp/server.cjs is unpacked, and out/bin/window-list is unpacked and executable. The packager reports the existing default icon and absence of a Developer ID signing identity. This prototype bundle is unsigned and unnotarized as documented in README.
 
@@ -38,6 +38,16 @@ Observed results:
 
 The verification bootstrap and fixtures are currently at /var/folders/c9/6p3b_52j3tjg1flszl2g97440000gn/T/perception-settings-verification-6gdhdxa1. This is temporary test state, not a required project path. To reproduce, create a private temporary userData directory and a bootstrap containing app.setPath('userData', temporaryPath) before loading the compiled main entry, then launch it with pnpm exec electron.
 
+## Independent review and revision
+
+Interlock's first fresh review found no material standards issues and verified AC1-AC10 and AC12-AC14. It independently ran lint, all 36 original tests, and macOS packaging. Rendered custom/empty persistence, layout, and an exact 10,000-character preference save passed. Its additional overlapping-save check found a P2 gap in AC11.
+
+The failure sequence was Save A pending, Save B pending, then an unsaved edit back to A. The older A completion cleared the dirty flag by comparing text alone. B's broadcast then replaced the unsaved A draft.
+
+The revision tracks each edit and save. Only the current save for the current edit can mark the draft clean or display its result. Clear counts as an edit. tests/settings.test.ts bundles the actual renderer and invokes its registered handlers with controllable IPC promises and state broadcasts. It verifies the reported sequence, stale success/failure confirmations, Clear followed by an edit, failed-save draft retention, retry, and synchronization after success. The two race regressions failed on the earlier implementation and passed after the fix. The complete suite now passes 39 tests.
+
+The compiled app was also checked with a private userData directory and a temporary bootstrap that delays only its preferences.json writes. Native UI actions entered A and saved, entered B and saved, then left A unsaved and focused. After releasing writes A and B in order, Settings still showed the unsaved A, with no stale success confirmation. The file contained B, proving both writes completed. The isolated app was quit afterward. This temporary bootstrap is at /var/folders/c9/6p3b_52j3tjg1flszl2g97440000gn/T/perception-race-fix-q8tn9cdq/controlled.cjs.
+
 ## Acceptance evidence
 
 | Criterion | Evidence |
@@ -52,15 +62,14 @@ The verification bootstrap and fixtures are currently at /var/folders/c9/6p3b_52
 | AC8 | Adapter tests cover both observation scopes, selection/no selection, metadata/no metadata, and selection without metadata. Existing app-context and annotate-image tests verify window choice and pixels. The pending-capture test verifies copied selection geometry. |
 | AC9 | "delimiter-like text and supplied entities cannot break any prompt section" injects tags, ampersands, and pre-escaped entities into preferences, question, capture description, app name, and bundle ID, then checks exact escaped values and all six delimiter tokens. Conversation tests preserve raw text. |
 | AC10 | Adapter tests verify image -i, new and resume arguments, sandbox, model, config isolation, web search, and MCP config, and receive real marks through the bridge. They confirm request sockets are removed. Production continues using the one existing adapter. |
-| AC11 | All rendered checks above passed, including final-layout screenshots, multiline save/relaunch, Clear/relaunch, unsaved draft after shortcut broadcast, migration, failed-save draft retention, saved-state isolation, and write recovery. |
+| AC11 | All rendered checks above passed, including final-layout screenshots, multiline save/relaunch, Clear/relaunch, unsaved draft after shortcut broadcast, migration, failed-save draft retention, saved-state isolation, and write recovery. The stale-save revision additionally passes actual-renderer delayed-response regressions and the native delayed-save check described above. |
 | AC12 | Full suite passes existing capture privacy/stale removal, annotation pixels/geometry, drawing validation, reset-during-capture cleanup, stale callbacks, clearing, and display cancellation. Added tests cover failure disposal and ignored concurrent sends. |
 | AC13 | README documents Save/Clear, first-message snapshot timing, New chat, style precedence, browser identity limits, raw HarnessRequest inputs, adapter assembly, image attachment, failed initialization, and cancellation. Obsolete next-message timing and editable developer-rule copy are removed. |
-| AC14 | Final lint, all 36 tests, typecheck/build/macOS packaging passed. The app bundle and unpacked executable/helper artifacts were inspected. |
-| AC15 | Implementation is ready for Interlock's fresh-context review. A focused PR follows a passing review; no PR URL is claimed yet. |
+| AC14 | Final lint, all 39 tests, typecheck/build/macOS packaging passed. The app bundle and unpacked executable/helper artifacts were inspected. |
+| AC15 | The first fresh review requested the AC11 revision. Its fix and observable evidence are recorded above. A second fresh review and focused PR follow; no PR URL is claimed yet. |
 
 ## Plan deviations and limits
 
 The Settings window height adjustment and queued saved-value publishing are recorded in plan.md. Both stay within the accepted layout and saved-preference behavior.
 
 No model-response compliance claim is made. Automated tests establish developer-rule content, CLI inputs, image attachment, lifecycle, and drawing transport. Native UI checks establish Settings interaction and persistence. The existing display-capture mechanics were retained and regression-tested; verification did not send a live screen to a model.
-

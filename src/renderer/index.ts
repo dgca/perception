@@ -6,6 +6,8 @@ const app = document.querySelector<HTMLDivElement>('#app')!
 const view = new URLSearchParams(location.search).get('view') ?? 'composer'
 let state: OverlayState | null = null
 let preferencesDirty = false
+let preferencesEdit = 0
+let preferencesSave = 0
 const labelContext = view === 'canvas' ? document.createElement('canvas').getContext('2d') : null
 if (labelContext) labelContext.font = '650 13px -apple-system, BlinkMacSystemFont, sans-serif'
 
@@ -266,17 +268,25 @@ function setupSettings(): void {
   const preferences = document.querySelector<HTMLTextAreaElement>('#user-preferences')!
   const preferencesResult = document.querySelector<HTMLSpanElement>('#preferences-result')!
   const savePreferences = (value: string, success: string): void => {
+    const edit = preferencesEdit
+    const save = ++preferencesSave
+    preferencesDirty = true
+    preferencesResult.textContent = ''
+    const isCurrent = (): boolean => edit === preferencesEdit && save === preferencesSave
     void window.perception
       .setUserPreferences(value)
       .then((response) => {
-        if (response.ok && preferences.value === value) preferencesDirty = false
+        if (!isCurrent()) return
+        if (response.ok) preferencesDirty = false
         preferencesResult.textContent = response.ok ? success : (response.error ?? 'Could not save preferences.')
       })
       .catch(() => {
+        if (!isCurrent()) return
         preferencesResult.textContent = 'Could not save preferences.'
       })
   }
   preferences.addEventListener('input', () => {
+    preferencesEdit++
     preferencesDirty = true
     preferencesResult.textContent = ''
   })
@@ -284,6 +294,7 @@ function setupSettings(): void {
     .querySelector('#save-preferences')!
     .addEventListener('click', () => savePreferences(preferences.value, 'Preferences saved. Start a new chat to apply them.'))
   document.querySelector('#clear-preferences')!.addEventListener('click', () => {
+    preferencesEdit++
     preferencesDirty = true
     preferences.value = ''
     savePreferences('', 'Preferences cleared for new chats.')
