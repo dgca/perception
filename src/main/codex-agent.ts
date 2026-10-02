@@ -2,8 +2,10 @@ import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { app } from 'electron'
+import { appContextPrompt } from './app-context'
 import { DrawingBridge } from './drawing-bridge'
 import type { HarnessRequest, HarnessSession } from './harness'
+import { PERCEPTION_INSTRUCTIONS } from './perception-instructions'
 
 type CodexEvent = {
   type?: string
@@ -20,15 +22,32 @@ function cancelled(): Error {
   return Object.assign(new Error('Request cancelled'), { name: 'AbortError' })
 }
 
+function escapeSection(value: string): string {
+  return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+}
+
+function promptFor(request: HarnessRequest, initialize: boolean): string {
+  const { captureDescription, appContext, selection } = request.screenshotContext
+  const selected = selection
+    ? `The user drew an orange rectangle at normalized coordinates x=${selection.x.toFixed(4)}, y=${selection.y.toFixed(4)}, width=${selection.width.toFixed(4)}, height=${selection.height.toFixed(4)}. The same rectangle is visible on the image.`
+    : 'The user did not select a region. Consider the full display.'
+  const context = [captureDescription, appContext ? appContextPrompt(appContext) : null, selected].filter((part) => part !== null).join('\n\n')
+  return [
+    initialize && request.userPreferences.trim() ? `<user_preferences>\n${escapeSection(request.userPreferences)}\n</user_preferences>` : null,
+    `<screenshot_context>\n${escapeSection(context)}\n</screenshot_context>`,
+    `<user_request>\n${escapeSection(request.userRequest)}\n</user_request>`
+  ]
+    .filter((part) => part !== null)
+    .join('\n\n')
+}
+
 // The Codex adapter owns the CLI process, session ID, and MCP transport.
 // Other harnesses can implement HarnessSession without using any of them.
 export class CodexAgent implements HarnessSession {
   private threadId: string | null = null
+  private preferencesInitialized = false
 
-  constructor(
-    private readonly codexPath: () => string | null,
-    private readonly getDeveloperInstructions: () => string
-  ) {}
+  constructor(private readonly codexPath: () => string | null) {}
 
   async ask(request: HarnessRequest): Promise<string> {
     if (request.signal.aborted) throw cancelled()
@@ -42,6 +61,7 @@ export class CodexAgent implements HarnessSession {
       if (!request.signal.aborted) request.onMark(mark)
     })
     await bridge.start()
+    let response: string
     try {
       if (request.signal.aborted) throw cancelled()
       const mcpConfig = `mcp_servers.perception={command=${tomlString(process.execPath)},args=[${tomlString(mcpScript)}],env={ELECTRON_RUN_AS_NODE="1",PERCEPTION_SOCKET_PATH=${tomlString(bridge.socketPath)}}}`
@@ -56,16 +76,17 @@ export class CodexAgent implements HarnessSession {
         '-c',
         mcpConfig,
         '-c',
-        `developer_instructions=${tomlString(this.getDeveloperInstructions())}`,
+        `developer_instructions=${tomlString(PERCEPTION_INSTRUCTIONS)}`,
         '-c',
         'web_search="live"'
       ]
+      const prompt = promptFor(request, !this.preferencesInitialized)
       const args = this.threadId
-        ? ['exec', 'resume', ...common, '-c', 'sandbox_mode="read-only"', this.threadId, request.prompt]
-        : ['exec', ...common, '-s', 'read-only', '-C', app.getPath('userData'), request.prompt]
+        ? ['exec', 'resume', ...common, '-c', 'sandbox_mode="read-only"', this.threadId, prompt]
+        : ['exec', ...common, '-s', 'read-only', '-C', app.getPath('userData'), prompt]
 
       request.onStatus('Asking Codex…')
-      return await new Promise<string>((resolve, reject) => {
+      response = await new Promise<string>((resolve, reject) => {
         const child = spawn(binary, args, {
           cwd: app.getPath('userData'),
           env: { ...process.env, PATH: `${process.env.PATH ?? ''}:/opt/homebrew/bin:/usr/local/bin:/usr/bin` },
@@ -131,5 +152,8 @@ export class CodexAgent implements HarnessSession {
     } finally {
       await bridge.stop()
     }
+    if (request.signal.aborted) throw cancelled()
+    this.preferencesInitialized = true
+    return response
   }
 }

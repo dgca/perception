@@ -150,3 +150,10 @@ Attach the created PR to this chat. Do not merge or deploy.
 ## Open questions
 
 None. The implementation plan stays within the accepted spec. Human plan approval is recorded in the existing Interlock run.
+
+## Implementation notes
+
+- Rendered Settings checks showed crowded bottom controls at 560 pixels. The window height is now 600 pixels, with confirmations allowed to wrap beside the action buttons.
+- Preference saves publish the new value only after the queued file write succeeds. General queued saves serialize the current settings when they run, so a later shortcut or position write cannot reintroduce an older preference value. Failed preference writes retain the last saved snapshot source.
+- The test-only Electron alias uses tests/support/electron-app.ts. Adapter tests use real child processes and the real DrawingBridge, with no extra dependency or second CLI adapter.
+- Screenshots were inspected through native UI tooling and returned inline during verification. The observations below are recorded in verification.md; screenshots were not added to the repository.

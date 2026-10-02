@@ -27,7 +27,7 @@ export type OverlayState = {
   codexPath: string | null
   shortcut: string
   shortcutReady: boolean
-  developerInstructions: string
+  userPreferences: string
   displayBounds: ScreenBounds | null
   canvasBounds: ScreenBounds | null
 }
@@ -44,6 +44,6 @@ export type OverlayAPI = {
   chooseCodex(): Promise<void>
   openScreenSettings(): void
   setShortcut(shortcut: string): Promise<{ ok: boolean; error?: string }>
-  setDeveloperInstructions(instructions: string): Promise<{ ok: boolean; error?: string }>
+  setUserPreferences(preferences: string): Promise<{ ok: boolean; error?: string }>
   movePanel(panel: 'toolbar' | 'composer', dx: number, dy: number): void
 }

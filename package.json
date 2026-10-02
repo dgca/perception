@@ -7,7 +7,7 @@
   "license": "MIT",
   "scripts": {
     "dev": "pnpm build:mcp && pnpm build:window-list && electron-vite dev",
-    "test": "esbuild tests/*.test.ts --bundle --platform=node --format=cjs --outdir=out/tests && node --test out/tests/*.test.js",
+    "test": "esbuild tests/*.test.ts --bundle --platform=node --format=cjs --alias:electron=./tests/support/electron-app.ts --outdir=out/tests && node --test out/tests/*.test.js",
     "lint": "biome check . --diagnostic-level=error",
     "format": "biome format --write .",
     "typecheck": "tsc --noEmit",

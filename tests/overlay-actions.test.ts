@@ -16,7 +16,7 @@ test('clear removes user and agent annotations without erasing the conversation'
     codexPath: '/tmp/codex',
     shortcut: 'Command+Shift+Space',
     shortcutReady: true,
-    developerInstructions: '',
+    userPreferences: '',
     displayBounds: null,
     canvasBounds: null
   }

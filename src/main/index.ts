@@ -9,15 +9,7 @@ import { annotateImage } from './annotate-image'
 import { removeStaleCaptures, writeCapture } from './capture-files'
 import { CodexAgent } from './codex-agent'
 import { Conversation, type Capture } from './conversation'
-import {
-  boundsToPosition,
-  DEFAULT_DEVELOPER_INSTRUCTIONS,
-  positionToBounds,
-  readPreferences,
-  validDeveloperInstructions,
-  validShortcut,
-  type Preferences
-} from './preferences'
+import { boundsToPosition, positionToBounds, readPreferences, validUserPreferences, validShortcut, type Preferences } from './preferences'
 import { trayIconPng } from './tray-icon'
 import { readAppContext } from './window-list'
 
@@ -37,7 +29,7 @@ const state: OverlayState = {
   codexPath: null,
   shortcut: 'Command+Shift+Space',
   shortcutReady: false,
-  developerInstructions: DEFAULT_DEVELOPER_INSTRUCTIONS,
+  userPreferences: '',
   displayBounds: null,
   canvasBounds: null
 }
@@ -116,9 +108,18 @@ function layout(display: Display): void {
   windows.composer?.setBounds(composerBounds)
 }
 
-function savePreferences(): Promise<void> {
-  const contents = JSON.stringify(preferences, null, 2)
-  saveQueue = saveQueue.catch(() => {}).then(() => writeFile(join(app.getPath('userData'), 'preferences.json'), contents))
+function savePreferences(userPreferences?: string): Promise<void> {
+  saveQueue = saveQueue
+    .catch(() => {})
+    .then(async () => {
+      const next = userPreferences === undefined ? preferences : { ...preferences, userPreferences }
+      await writeFile(join(app.getPath('userData'), 'preferences.json'), JSON.stringify(next, null, 2))
+      // New chats use the last saved preferences, including while a write is pending.
+      if (userPreferences !== undefined) {
+        preferences.userPreferences = userPreferences
+        state.userPreferences = userPreferences
+      }
+    })
   return saveQueue
 }
 
@@ -178,7 +179,7 @@ function openSettings(): void {
   if (!settingsWindow || settingsWindow.isDestroyed()) {
     settingsWindow = new BrowserWindow({
       width: 500,
-      height: 560,
+      height: 600,
       show: false,
       resizable: false,
       minimizable: false,
@@ -369,11 +370,9 @@ function setupIpc(): void {
     broadcast()
     return { ok: true }
   })
-  ipcMain.handle('overlay:set-developer-instructions', async (_event, instructions: unknown): Promise<{ ok: boolean; error?: string }> => {
-    if (!validDeveloperInstructions(instructions)) return { ok: false, error: 'Instructions must be 10,000 characters or fewer.' }
-    preferences.developerInstructions = instructions
-    state.developerInstructions = instructions
-    await savePreferences()
+  ipcMain.handle('overlay:set-user-preferences', async (_event, value: unknown): Promise<{ ok: boolean; error?: string }> => {
+    if (!validUserPreferences(value)) return { ok: false, error: 'Preferences must be 10,000 characters or fewer.' }
+    await savePreferences(value)
     broadcast()
     return { ok: true }
   })
@@ -434,13 +433,9 @@ else {
           .catch(() => null)
       )
       state.shortcut = preferences.shortcut
-      state.developerInstructions = preferences.developerInstructions
+      state.userPreferences = preferences.userPreferences
       conversation = new Conversation(state, {
-        createSession: () =>
-          new CodexAgent(
-            () => state.codexPath,
-            () => preferences.developerInstructions
-          ),
+        createSession: () => new CodexAgent(() => state.codexPath),
         capture: captureDisplay,
         setPointerMode: () => setMode('pointer'),
         publish: broadcast
