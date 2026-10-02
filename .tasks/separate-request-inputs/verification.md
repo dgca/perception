@@ -75,3 +75,9 @@ The second fresh review submitted pass with no material spec or standards findin
 The Settings window height adjustment and queued saved-value publishing are recorded in plan.md. Both stay within the accepted layout and saved-preference behavior.
 
 No model-response compliance claim is made. Automated tests establish developer-rule content, CLI inputs, image attachment, lifecycle, and drawing transport. Native UI checks establish Settings interaction and persistence. The existing display-capture mechanics were retained and regression-tested; verification did not send a live screen to a model.
+
+## Clipboard follow-up
+
+At the user's request, this small fix was added directly to PR #2 without another Interlock run. The custom application menu lacked native editing roles. Adding Electron's built-in editMenu restores editing commands for Settings and the composer.
+
+Using private temporary app data, the original build reproduced failed paste into an empty User preferences field. The fixed build passed native paste, Select All, Copy followed by delete and Paste, Cut/Paste, Undo/Redo, and Save with exact multiline text. The copied text also pasted into the composer without sending a request. The temporary app was quit. Lint, all 39 existing tests, macOS packaging, and git diff --check passed for this follow-up. The earlier independent review covers the main change; this menu addition was verified directly.

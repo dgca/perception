@@ -458,7 +458,8 @@ else {
               { type: 'separator' },
               { role: 'quit' }
             ]
-          }
+          },
+          { role: 'editMenu' }
         ])
       )
       try {
