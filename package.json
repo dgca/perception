@@ -6,13 +6,14 @@
   "author": "Perception contributors",
   "license": "MIT",
   "scripts": {
-    "dev": "pnpm build:mcp && electron-vite dev",
+    "dev": "pnpm build:mcp && pnpm build:window-list && electron-vite dev",
     "test": "esbuild tests/*.test.ts --bundle --platform=node --format=cjs --outdir=out/tests && node --test out/tests/*.test.js",
     "lint": "biome check . --diagnostic-level=error",
     "format": "biome format --write .",
     "typecheck": "tsc --noEmit",
     "build:mcp": "esbuild src/mcp/server.ts --bundle --platform=node --format=cjs --target=node22 --outfile=out/mcp/server.cjs",
-    "build": "pnpm typecheck && electron-vite build && pnpm build:mcp",
+    "build:window-list": "node scripts/build-window-list.mjs",
+    "build": "pnpm typecheck && electron-vite build && pnpm build:mcp && pnpm build:window-list",
     "package:mac": "pnpm build && electron-builder --mac dir"
   },
   "devDependencies": {
@@ -34,7 +35,8 @@
       "package.json"
     ],
     "asarUnpack": [
-      "out/mcp/server.cjs"
+      "out/mcp/server.cjs",
+      "out/bin/window-list"
     ],
     "mac": {
       "category": "public.app-category.productivity",

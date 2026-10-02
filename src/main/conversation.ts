@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto'
 import type { OverlayState, Rectangle } from '../shared/types'
+import { appContextPrompt, type AppContext } from './app-context'
 import type { HarnessSession } from './harness'
 import { clearAnnotations } from './overlay-actions'
 
-export type Capture = { path: string; dispose(): Promise<void> }
+export type Capture = { path: string; appContext?: AppContext | null; dispose(): Promise<void> }
 
 export type ConversationHost = {
   createSession(): HarnessSession
@@ -47,9 +48,12 @@ export class Conversation {
         : 'The user did not select a region. Consider the full display.'
       const prompt = [
         'The attached image is a full-display capture taken when they sent this message. It may become stale as the user works.',
+        capture.appContext ? appContextPrompt(capture.appContext) : null,
         selected,
         `User request: ${question}`
-      ].join('\n\n')
+      ]
+        .filter((part) => part !== null)
+        .join('\n\n')
 
       const answer = await this.session.ask({
         prompt,

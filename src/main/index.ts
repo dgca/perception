@@ -19,6 +19,7 @@ import {
   type Preferences
 } from './preferences'
 import { trayIconPng } from './tray-icon'
+import { readAppContext } from './window-list'
 
 const windows: { canvas: BrowserWindow | null; toolbar: BrowserWindow | null; composer: BrowserWindow | null } = {
   canvas: null,
@@ -264,6 +265,10 @@ async function findCodex(): Promise<string | null> {
   return null
 }
 
+function windowListHelperPath(): string {
+  return app.isPackaged ? join(process.resourcesPath, 'app.asar.unpacked/out/bin/window-list') : join(__dirname, '../bin/window-list')
+}
+
 async function captureDisplay(rectangle: Rectangle | null, signal: AbortSignal): Promise<Capture> {
   const previous = captureQueue
   let release!: () => void
@@ -277,6 +282,8 @@ async function captureDisplay(rectangle: Rectangle | null, signal: AbortSignal):
     for (const win of Object.values(windows)) win?.hide()
     await new Promise((resolve) => setTimeout(resolve, 160))
     try {
+      if (signal.aborted) throw new Error('Request cancelled')
+      const appContext = await readAppContext(windowListHelperPath(), display.bounds, rectangle, process.pid, signal)
       if (signal.aborted) throw new Error('Request cancelled')
       const sources = await desktopCapturer
         .getSources({
@@ -304,7 +311,7 @@ async function captureDisplay(rectangle: Rectangle | null, signal: AbortSignal):
       }
       const png = annotateImage(source.thumbnail.toPNG(), rectangle)
       if (signal.aborted) throw new Error('Request cancelled')
-      return await writeCapture(join(app.getPath('userData'), 'captures'), png)
+      return { ...(await writeCapture(join(app.getPath('userData'), 'captures'), png)), appContext }
     } finally {
       if (state.visible) {
         windows.canvas?.showInactive()

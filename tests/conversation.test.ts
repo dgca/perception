@@ -95,6 +95,48 @@ test('new conversation ignores late status, marks, and answers from the old sess
   assert.equal(disposed, 2)
 })
 
+test('each prompt uses app context from its own capture and continues when context is missing', async () => {
+  const current = state()
+  const session = new FakeSession()
+  const contexts = [
+    { name: 'ChatGPT', bundleId: 'test.chatgpt', scope: 'display' as const },
+    { name: 'Chrome', bundleId: 'test.chrome', scope: 'selection' as const },
+    null
+  ]
+  const conversation = new Conversation(current, {
+    createSession: () => session,
+    capture: async () => ({ path: '/tmp/capture.png', appContext: contexts.shift(), dispose: async () => {} }),
+    setPointerMode: () => {
+      current.mode = 'pointer'
+    },
+    publish: () => {}
+  })
+
+  const first = conversation.send('First question')
+  await Promise.resolve()
+  assert.match(session.calls[0].request.prompt, /Topmost app window on the captured display/)
+  assert.match(session.calls[0].request.prompt, /"name":"ChatGPT","bundleId":"test.chatgpt"/)
+  session.calls[0].answer.resolve('First answer')
+  await first
+
+  current.userRectangle = { x: 0.1, y: 0.2, width: 0.3, height: 0.4 }
+  const second = conversation.send('Second question')
+  await Promise.resolve()
+  assert.match(session.calls[1].request.prompt, /App window at the selection's center/)
+  assert.match(session.calls[1].request.prompt, /"name":"Chrome","bundleId":"test.chrome"/)
+  assert.doesNotMatch(session.calls[1].request.prompt, /test.chatgpt/)
+  session.calls[1].answer.resolve('Second answer')
+  await second
+
+  const third = conversation.send('Third question')
+  await Promise.resolve()
+  assert.doesNotMatch(session.calls[2].request.prompt, /OS metadata/)
+  assert.match(session.calls[2].request.prompt, /User request: Third question/)
+  assert.equal(session.calls[2].request.imagePath, '/tmp/capture.png')
+  session.calls[2].answer.resolve('Third answer')
+  await third
+})
+
 test('reset during capture disposes its image and does not call the harness', async () => {
   const current = state()
   const waitingCapture = deferred<Capture>()
