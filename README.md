@@ -13,11 +13,13 @@ pnpm install
 pnpm dev
 ```
 
-Perception starts with its overlay open. Press **⌘⇧Space** to show or hide it. Use the menu bar icon to show or hide the overlay, open **Settings**, or quit the app. In **Settings**, click the shortcut and press a new combination. You can also edit the developer instructions sent to Codex, save them, or restore the default. Changes apply to the next message. Press **Escape** or click the close button to dismiss the overlay.
+Perception starts with its overlay open. Press **⌘⇧Space** to show or hide it. Use the menu bar icon to show or hide the overlay, open **Settings**, or quit the app. In **Settings**, click the shortcut and press a new combination. Press **Escape** or click the close button to dismiss the overlay.
+
+Use **User preferences** in Settings to customize tone, detail, formatting, and explanations, then click **Save**. Preferences are saved for new chats and snapshotted when you send the first message. Click **New chat** to apply edits to an existing conversation. **Clear preferences** saves an empty value for new chats. Responses default to plain text without Markdown; your preferences can change that style, and the current question takes priority over conflicting saved style preferences. Perception's fixed behavior rules stay in its developer instructions and cannot be edited in Settings.
 
 Click the rectangle button, then drag across the part of the screen you want to discuss. The orange rectangle appears on the live overlay and on the image sent with your next message. The pointer button lets you use the app beneath the overlay while keeping the conversation open. Send a prompt with **Return**; use **Shift-Return** for a new line. The agent's marks appear in teal. The toolbar's trash button clears annotations while keeping the conversation. Click **New chat** to start over.
 
-With a rectangle, Perception tells the agent which app window was under its center when the screenshot was taken. Without one, it reports the topmost ordinary app window on the captured display. It checks again for every message. It identifies the macOS app, so a ChatGPT tab in Chrome is identified as Chrome. If macOS cannot identify the window, Perception sends the screenshot without an app label.
+With a rectangle, Perception tells the agent which app window was under its center when the screenshot was taken. Without one, it reports the topmost ordinary app window on the captured display. It checks again for every message. macOS identity names the window's owner, so a ChatGPT tab in Chrome is identified as Chrome. Browser identity does not establish which website or web app is open; the agent uses the screenshot and question to determine that. If macOS cannot identify the window, Perception sends the screenshot without an app label.
 
 Drag the six dots on the toolbar or the chat box header to move that window. Perception saves both positions and uses them when you reopen the overlay.
 
@@ -41,7 +43,11 @@ Perception writes captures to a private directory, removes them after each reque
 
 ## Harness interface
 
-`Conversation` owns the request lifecycle, capture cleanup, conversation reset, and which status updates and marks may reach the overlay. It creates a `HarnessSession` for each conversation. The session's `ask` method receives a prompt, image path, cancellation signal, and callbacks for status and drawing. `CodexAgent` is the current adapter: it owns the Codex CLI process, Codex thread ID, and a drawing MCP socket for each request. A new harness implements `HarnessSession` and handles its own process, conversation ID, and tool transport. The request lifecycle and capture code do not depend on those details. The current settings UI remains Codex-specific.
+`Conversation` owns the request lifecycle, capture cleanup, conversation reset, and which status updates and marks may reach the overlay. It creates a `HarnessSession` and snapshots preferences on the first nonempty message. The session's `ask` method receives the current question, saved preference snapshot, screenshot context, image path, cancellation signal, and callbacks for status and drawing as separate inputs.
+
+`CodexAgent` is the current adapter. It owns the CLI process, thread ID, drawing MCP socket, and prompt assembly. Perception's fixed rules use Codex's real `developer_instructions` config. A nonempty `<user_preferences>` section initializes the chat, followed by `<screenshot_context>` and `<user_request>` on every request. Variable text is escaped to preserve those sections, and the PNG is attached separately through Codex's image option. Successful follow-ups resume the CLI thread without repeating preferences. Failed initialization retries with the same snapshot. Display-change cancellation retains the snapshot when it replaces the session; **New chat** clears it.
+
+A new harness implements `HarnessSession` and handles its own process, conversation ID, and tool transport. The request lifecycle and capture code do not depend on those details. Existing custom developer-instruction settings load as user preferences; the two historical built-in defaults load as empty preferences.
 
 ## Check the build
 

@@ -1,11 +1,13 @@
 import type { OverlayState, Rectangle } from '../shared/types'
-import { DEFAULT_DEVELOPER_INSTRUCTIONS } from '../main/preferences'
 import { markSvg, normalizedPointer, rectSvg, rectanglePixels, type CanvasGeometry } from './annotations'
 import './style.css'
 
 const app = document.querySelector<HTMLDivElement>('#app')!
 const view = new URLSearchParams(location.search).get('view') ?? 'composer'
 let state: OverlayState | null = null
+let preferencesDirty = false
+let preferencesEdit = 0
+let preferencesSave = 0
 const labelContext = view === 'canvas' ? document.createElement('canvas').getContext('2d') : null
 if (labelContext) labelContext.font = '650 13px -apple-system, BlinkMacSystemFont, sans-serif'
 
@@ -219,10 +221,10 @@ function setupSettings(): void {
     <p class="settings-help">Click the shortcut, then press a new combination. Use ⌘, Control, or Option with a letter, number, Space, or F key.</p>
     <div class="settings-actions"><span id="shortcut-result" role="status"></span><button id="reset-shortcut" class="reset-button">Reset default</button></div>
     <div class="settings-divider"></div>
-    <label class="instructions-label" for="developer-instructions">Developer instructions</label>
-    <p class="instructions-help">Sent to Codex with each request. Edits apply to the next message.</p>
-    <textarea id="developer-instructions" maxlength="10000" spellcheck="false" aria-label="Developer instructions"></textarea>
-    <div class="settings-actions"><span id="instructions-result" role="status"></span><div class="settings-buttons"><button id="reset-instructions" class="reset-button">Reset default</button><button id="save-instructions" class="save-button">Save</button></div></div>
+    <label class="preferences-label" for="user-preferences">User preferences</label>
+    <p class="preferences-help">Customize tone, detail, formatting, and explanations. Saved preferences apply when you send the first message in a new chat. Your current question takes priority over saved style preferences.</p>
+    <textarea id="user-preferences" maxlength="10000" spellcheck="false" aria-label="User preferences"></textarea>
+    <div class="settings-actions preferences-actions"><span id="preferences-result" role="status"></span><div class="settings-buttons"><button id="clear-preferences" class="reset-button">Clear preferences</button><button id="save-preferences" class="save-button">Save</button></div></div>
   </section>`
   const button = document.querySelector<HTMLButtonElement>('#shortcut-input')!
   const result = document.querySelector<HTMLSpanElement>('#shortcut-result')!
@@ -263,25 +265,39 @@ function setupSettings(): void {
       if (state) button.textContent = shortcutLabel(state.shortcut)
     })
   })
-  const instructions = document.querySelector<HTMLTextAreaElement>('#developer-instructions')!
-  const instructionsResult = document.querySelector<HTMLSpanElement>('#instructions-result')!
-  const saveInstructions = (value: string, success: string): void => {
+  const preferences = document.querySelector<HTMLTextAreaElement>('#user-preferences')!
+  const preferencesResult = document.querySelector<HTMLSpanElement>('#preferences-result')!
+  const savePreferences = (value: string, success: string): void => {
+    const edit = preferencesEdit
+    const save = ++preferencesSave
+    preferencesDirty = true
+    preferencesResult.textContent = ''
+    const isCurrent = (): boolean => edit === preferencesEdit && save === preferencesSave
     void window.perception
-      .setDeveloperInstructions(value)
+      .setUserPreferences(value)
       .then((response) => {
-        instructionsResult.textContent = response.ok ? success : (response.error ?? 'Could not save instructions.')
+        if (!isCurrent()) return
+        if (response.ok) preferencesDirty = false
+        preferencesResult.textContent = response.ok ? success : (response.error ?? 'Could not save preferences.')
       })
       .catch(() => {
-        instructionsResult.textContent = 'Could not save instructions.'
+        if (!isCurrent()) return
+        preferencesResult.textContent = 'Could not save preferences.'
       })
   }
-  instructions.addEventListener('input', () => {
-    instructionsResult.textContent = ''
+  preferences.addEventListener('input', () => {
+    preferencesEdit++
+    preferencesDirty = true
+    preferencesResult.textContent = ''
   })
-  document.querySelector('#save-instructions')!.addEventListener('click', () => saveInstructions(instructions.value, 'Instructions saved.'))
-  document.querySelector('#reset-instructions')!.addEventListener('click', () => {
-    instructions.value = DEFAULT_DEVELOPER_INSTRUCTIONS
-    saveInstructions(instructions.value, 'Default instructions restored.')
+  document
+    .querySelector('#save-preferences')!
+    .addEventListener('click', () => savePreferences(preferences.value, 'Preferences saved. Start a new chat to apply them.'))
+  document.querySelector('#clear-preferences')!.addEventListener('click', () => {
+    preferencesEdit++
+    preferencesDirty = true
+    preferences.value = ''
+    savePreferences('', 'Preferences cleared for new chats.')
   })
 }
 
@@ -289,8 +305,8 @@ function updateSettings(next: OverlayState): void {
   const button = document.querySelector<HTMLButtonElement>('#shortcut-input')!
   if (button.textContent !== 'Press shortcut…') button.textContent = shortcutLabel(next.shortcut)
   if (!next.shortcutReady) document.querySelector('#shortcut-result')!.textContent = 'Current shortcut is unavailable. Record another.'
-  const instructions = document.querySelector<HTMLTextAreaElement>('#developer-instructions')!
-  if (document.activeElement !== instructions && instructions.value !== next.developerInstructions) instructions.value = next.developerInstructions
+  const preferences = document.querySelector<HTMLTextAreaElement>('#user-preferences')!
+  if (!preferencesDirty && preferences.value !== next.userPreferences) preferences.value = next.userPreferences
 }
 
 if (view === 'canvas') setupCanvas()

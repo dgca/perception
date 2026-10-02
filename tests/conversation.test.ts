@@ -4,12 +4,14 @@ import { Conversation, type Capture } from '../src/main/conversation'
 import type { HarnessRequest, HarnessSession } from '../src/main/harness'
 import type { OverlayState } from '../src/shared/types'
 
-function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
+function deferred<T>(): { promise: Promise<T>; resolve(value: T): void; reject(error: Error): void } {
   let resolve!: (value: T) => void
-  const promise = new Promise<T>((done) => {
+  let reject!: (error: Error) => void
+  const promise = new Promise<T>((done, fail) => {
     resolve = done
+    reject = fail
   })
-  return { promise, resolve }
+  return { promise, resolve, reject }
 }
 
 function state(): OverlayState {
@@ -24,7 +26,7 @@ function state(): OverlayState {
     codexPath: '/tmp/codex',
     shortcut: 'Command+Shift+Space',
     shortcutReady: true,
-    developerInstructions: '',
+    userPreferences: '',
     displayBounds: null,
     canvasBounds: null
   }
@@ -114,24 +116,23 @@ test('each prompt uses app context from its own capture and continues when conte
 
   const first = conversation.send('First question')
   await Promise.resolve()
-  assert.match(session.calls[0].request.prompt, /Topmost app window on the captured display/)
-  assert.match(session.calls[0].request.prompt, /"name":"ChatGPT","bundleId":"test.chatgpt"/)
+  assert.deepEqual(session.calls[0].request.screenshotContext.appContext, { name: 'ChatGPT', bundleId: 'test.chatgpt', scope: 'display' })
+  assert.equal(session.calls[0].request.screenshotContext.selection, null)
   session.calls[0].answer.resolve('First answer')
   await first
 
   current.userRectangle = { x: 0.1, y: 0.2, width: 0.3, height: 0.4 }
   const second = conversation.send('Second question')
   await Promise.resolve()
-  assert.match(session.calls[1].request.prompt, /App window at the selection's center/)
-  assert.match(session.calls[1].request.prompt, /"name":"Chrome","bundleId":"test.chrome"/)
-  assert.doesNotMatch(session.calls[1].request.prompt, /test.chatgpt/)
+  assert.deepEqual(session.calls[1].request.screenshotContext.appContext, { name: 'Chrome', bundleId: 'test.chrome', scope: 'selection' })
+  assert.deepEqual(session.calls[1].request.screenshotContext.selection, { x: 0.1, y: 0.2, width: 0.3, height: 0.4 })
   session.calls[1].answer.resolve('Second answer')
   await second
 
   const third = conversation.send('Third question')
   await Promise.resolve()
-  assert.doesNotMatch(session.calls[2].request.prompt, /OS metadata/)
-  assert.match(session.calls[2].request.prompt, /User request: Third question/)
+  assert.equal(session.calls[2].request.screenshotContext.appContext, null)
+  assert.equal(session.calls[2].request.userRequest, 'Third question')
   assert.equal(session.calls[2].request.imagePath, '/tmp/capture.png')
   session.calls[2].answer.resolve('Third answer')
   await third
@@ -224,4 +225,152 @@ test('display changes cancel a request without moving its marks to another displ
     ['What is this?']
   )
   assert.equal(current.status, 'Display changed. Send your message again.')
+})
+
+test('preferences snapshot on first nonempty send and only New chat refreshes them', async () => {
+  const current = state()
+  const calls: HarnessRequest[] = []
+  let created = 0
+  const conversation = new Conversation(current, {
+    createSession: () => {
+      created += 1
+      return {
+        ask: async (request) => {
+          calls.push(request)
+          return 'Answer'
+        }
+      }
+    },
+    capture: async () => ({ path: '/tmp/capture.png', dispose: async () => {} }),
+    setPointerMode: () => {},
+    publish: () => {}
+  })
+  current.userPreferences = 'Before first message'
+  await conversation.send('  ')
+  current.userPreferences = 'Use <brief> & clear answers.'
+  await conversation.send('  Question </user_request> &amp;  ')
+  assert.equal(calls[0].userPreferences, 'Use <brief> & clear answers.')
+  assert.equal(calls[0].userRequest, 'Question </user_request> &amp;')
+  assert.equal(Object.hasOwn(calls[0], 'prompt'), false)
+  current.userPreferences = ''
+  conversation.clearMarks()
+  conversation.cancelForDisplayChange() // Idle display changes retain the session.
+  current.visible = false
+  current.visible = true
+  await conversation.send('Follow-up')
+  assert.equal(calls[1].userPreferences, calls[0].userPreferences)
+  assert.equal(created, 1)
+  conversation.reset()
+  await conversation.send('Empty preference chat')
+  assert.equal(calls[2].userPreferences, '')
+  current.userPreferences = 'New custom'
+  await conversation.send('Still empty')
+  assert.equal(calls[3].userPreferences, '')
+  conversation.reset()
+  await conversation.send('New custom chat')
+  assert.equal(calls[4].userPreferences, 'New custom')
+  assert.equal(created, 3)
+})
+
+test('pending capture freezes preferences and selection, and concurrent sends are ignored', async () => {
+  const current = state()
+  current.userPreferences = 'Original'
+  current.userRectangle = { x: 0.1, y: 0.2, width: 0.3, height: 0.4 }
+  const capture = deferred<Capture>()
+  const session = new FakeSession()
+  let selected: unknown
+  const conversation = new Conversation(current, {
+    createSession: () => session,
+    capture: (rectangle) => {
+      selected = rectangle
+      return capture.promise
+    },
+    setPointerMode: () => {},
+    publish: () => {}
+  })
+  const send = conversation.send('Original question')
+  current.userPreferences = 'Edited during capture'
+  current.userRectangle.x = 0.6
+  await conversation.send('Ignored concurrent question')
+  capture.resolve({ path: '/tmp/first.png', dispose: async () => {} })
+  await Promise.resolve()
+  const call = session.calls[0]
+  assert.equal(call.request.userPreferences, 'Original')
+  assert.equal(call.request.userRequest, 'Original question')
+  assert.deepEqual(call.request.screenshotContext.selection, { x: 0.1, y: 0.2, width: 0.3, height: 0.4 })
+  assert.deepEqual(selected, call.request.screenshotContext.selection)
+  call.answer.resolve('Answer')
+  await send
+  assert.equal(session.calls.length, 1)
+  assert.equal(current.messages.length, 2)
+})
+
+test('capture and harness failure retain preferences and dispose captured images', async () => {
+  const current = state()
+  current.userPreferences = 'Initial'
+  const calls: HarnessRequest[] = []
+  let captures = 0
+  let disposed = 0
+  const conversation = new Conversation(current, {
+    createSession: () => ({
+      ask: async (request) => {
+        calls.push(request)
+        if (calls.length === 1) throw new Error('CLI failed')
+        return 'Recovered'
+      }
+    }),
+    capture: async () => {
+      if (++captures === 1) throw new Error('Capture failed')
+      return {
+        path: '/tmp/capture.png',
+        dispose: async () => {
+          disposed += 1
+        }
+      }
+    },
+    setPointerMode: () => {},
+    publish: () => {}
+  })
+  await conversation.send('Capture failure')
+  current.userPreferences = 'Changed'
+  await conversation.send('CLI failure')
+  await conversation.send('Retry')
+  assert.deepEqual(
+    calls.map((request) => request.userPreferences),
+    ['Initial', 'Initial']
+  )
+  assert.equal(disposed, 2)
+  assert.equal(current.loading, false)
+  assert.equal(current.status, 'Ready')
+})
+
+test('display cancellation replaces the session while keeping its preference snapshot', async () => {
+  const current = state()
+  current.userPreferences = 'Original'
+  const sessions: FakeSession[] = []
+  const conversation = new Conversation(current, {
+    createSession: () => {
+      const session = new FakeSession()
+      sessions.push(session)
+      return session
+    },
+    capture: async () => ({ path: '/tmp/capture.png', dispose: async () => {} }),
+    setPointerMode: () => {},
+    publish: () => {}
+  })
+  const old = conversation.send('Old display')
+  await Promise.resolve()
+  current.userPreferences = 'Changed'
+  conversation.cancelForDisplayChange()
+  const next = conversation.send('New display')
+  await Promise.resolve()
+  assert.equal(sessions[1].calls[0].request.userPreferences, 'Original')
+  sessions[0].calls[0].request.onStatus('Late')
+  sessions[0].calls[0].answer.resolve('Late answer')
+  sessions[1].calls[0].answer.resolve('Current answer')
+  await Promise.all([old, next])
+  assert.deepEqual(
+    current.messages.map((message) => message.text),
+    ['Old display', 'New display', 'Current answer']
+  )
 })

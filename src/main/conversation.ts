@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { OverlayState, Rectangle } from '../shared/types'
-import { appContextPrompt, type AppContext } from './app-context'
+import type { AppContext } from './app-context'
 import type { HarnessSession } from './harness'
 import { clearAnnotations } from './overlay-actions'
 
@@ -18,6 +18,7 @@ type ActiveRequest = { signal: AbortController; marksEnabled: boolean }
 export class Conversation {
   private session: HarnessSession
   private active: ActiveRequest | null = null
+  private userPreferences: string | null = null
 
   constructor(
     private readonly state: OverlayState,
@@ -32,7 +33,9 @@ export class Conversation {
 
     const request: ActiveRequest = { signal: new AbortController(), marksEnabled: true }
     this.active = request
-    const rectangle = this.state.userRectangle
+    this.userPreferences ??= this.state.userPreferences
+    const userPreferences = this.userPreferences
+    const rectangle = this.state.userRectangle ? { ...this.state.userRectangle } : null
     let capture: Capture | null = null
     this.state.messages.push({ id: randomUUID(), role: 'user', text: question })
     this.state.loading = true
@@ -43,20 +46,14 @@ export class Conversation {
       capture = await this.host.capture(rectangle, request.signal.signal)
       if (!this.isCurrent(request)) return
 
-      const selected = rectangle
-        ? `The user drew an orange rectangle at normalized coordinates x=${rectangle.x.toFixed(4)}, y=${rectangle.y.toFixed(4)}, width=${rectangle.width.toFixed(4)}, height=${rectangle.height.toFixed(4)}. The same rectangle is visible on the image.`
-        : 'The user did not select a region. Consider the full display.'
-      const prompt = [
-        'The attached image is a full-display capture taken when they sent this message. It may become stale as the user works.',
-        capture.appContext ? appContextPrompt(capture.appContext) : null,
-        selected,
-        `User request: ${question}`
-      ]
-        .filter((part) => part !== null)
-        .join('\n\n')
-
       const answer = await this.session.ask({
-        prompt,
+        userRequest: question,
+        userPreferences,
+        screenshotContext: {
+          captureDescription: 'The attached image is a full-display capture taken for this message. It may become stale as the user works.',
+          appContext: capture.appContext ? { ...capture.appContext } : null,
+          selection: rectangle
+        },
         imagePath: capture.path,
         signal: request.signal.signal,
         onStatus: (status) => {
@@ -104,6 +101,7 @@ export class Conversation {
 
   reset(): void {
     this.cancel()
+    this.userPreferences = null
     this.state.userRectangle = null
     this.state.agentMarks = []
     this.state.messages = []
