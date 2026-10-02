@@ -4,7 +4,7 @@
 
 Implementation follows the accepted intent, spec, and plan on codex/separate-request-inputs, based on the PR #1 merge ede17738458ae68778f723b7576cf8b328928533.
 
-The first independent review found one Settings draft-retention race. The revision below fixes it, with a regression test and a rendered delayed-save check. Fresh review and PR preparation remain pending.
+Interlock review passed after fixing one Settings draft-retention race. The focused [PR #2](https://github.com/dgca/perception/pull/2) is open for human review on codex/separate-request-inputs. No merge or deployment was performed.
 
 ## Automated checks
 
@@ -48,6 +48,8 @@ The revision tracks each edit and save. Only the current save for the current ed
 
 The compiled app was also checked with a private userData directory and a temporary bootstrap that delays only its preferences.json writes. Native UI actions entered A and saved, entered B and saved, then left A unsaved and focused. After releasing writes A and B in order, Settings still showed the unsaved A, with no stale success confirmation. The file contained B, proving both writes completed. The isolated app was quit afterward. This temporary bootstrap is at /var/folders/c9/6p3b_52j3tjg1flszl2g97440000gn/T/perception-race-fix-q8tn9cdq/controlled.cjs.
 
+The second fresh review submitted pass with no material spec or standards findings. It independently ran lint, all 39 tests, macOS packaging, and git diff --check. Native Settings checks passed custom multiline Save/relaunch, Clear/empty relaunch, full layout, and unfocused-draft retention after a state broadcast. An additional boundary check cancelled during a pending capture, completed a new send before the stale capture resolved, and verified the retained snapshot and disposal of both images. Its private verification app was quit. Temporary review evidence is at /var/folders/c9/6p3b_52j3tjg1flszl2g97440000gn/T/perception-review2-zzfuo6_o.
+
 ## Acceptance evidence
 
 | Criterion | Evidence |
@@ -66,7 +68,7 @@ The compiled app was also checked with a private userData directory and a tempor
 | AC12 | Full suite passes existing capture privacy/stale removal, annotation pixels/geometry, drawing validation, reset-during-capture cleanup, stale callbacks, clearing, and display cancellation. Added tests cover failure disposal and ignored concurrent sends. |
 | AC13 | README documents Save/Clear, first-message snapshot timing, New chat, style precedence, browser identity limits, raw HarnessRequest inputs, adapter assembly, image attachment, failed initialization, and cancellation. Obsolete next-message timing and editable developer-rule copy are removed. |
 | AC14 | Final lint, all 39 tests, typecheck/build/macOS packaging passed. The app bundle and unpacked executable/helper artifacts were inspected. |
-| AC15 | The first fresh review requested the AC11 revision. Its fix and observable evidence are recorded above. A second fresh review and focused PR follow; no PR URL is claimed yet. |
+| AC15 | The first fresh review requested the AC11 revision. The second fresh review passed with no findings. [PR #2](https://github.com/dgca/perception/pull/2) contains the accepted artifacts, code, tests, and docs, and is attached to the task for human review. |
 
 ## Plan deviations and limits
 
